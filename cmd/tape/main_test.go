@@ -34,6 +34,56 @@ func TestRunInspectShowsSampleEvents(t *testing.T) {
 	}
 }
 
+func TestRunReplayPrintsEvents(t *testing.T) {
+	output := captureStdout(t, func() {
+		err := run([]string{
+			"replay",
+			"--print",
+			"--metrics=false",
+			filepath.Join("..", "..", "testdata", "ticks_5_rows.csv"),
+		})
+		if err != nil {
+			t.Fatalf("run replay: %v", err)
+		}
+	})
+
+	for _, fragment := range []string{
+		"seq=1",
+		"seq=5",
+		"symbol=ERICB",
+		"price=",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output missing %q\n%s", fragment, output)
+		}
+	}
+}
+
+func TestRunReplayRecordsEvents(t *testing.T) {
+	recordPath := filepath.Join(t.TempDir(), "session.tape")
+
+	err := run([]string{
+		"replay",
+		"--metrics=false",
+		"--record", recordPath,
+		filepath.Join("..", "..", "testdata", "ticks_5_rows.csv"),
+	})
+	if err != nil {
+		t.Fatalf("run replay: %v", err)
+	}
+
+	contents, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read recording: %v", err)
+	}
+	if count := strings.Count(string(contents), "\n"); count != 5 {
+		t.Fatalf("record lines = %d, want 5", count)
+	}
+	if !strings.Contains(string(contents), `"type":"tick"`) {
+		t.Fatalf("recording missing tick payloads\n%s", string(contents))
+	}
+}
+
 func TestRunInspectAppliesFiltersToSummaryAndSample(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mixed.tape")
 	records := strings.Join([]string{

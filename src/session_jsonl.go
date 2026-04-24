@@ -42,12 +42,16 @@ func NewRecorderWithCodecs(path string, codecs ...EventCodec) (*Recorder, error)
 func (r *Recorder) Middleware() Middleware {
 	return func(next EventHandler) EventHandler {
 		return func(ctx Context, event Event) error {
-			if err := r.Record(ctx.Index, event); err != nil {
+			if err := r.Write(ctx, event); err != nil {
 				return err
 			}
 			return next(ctx, event)
 		}
 	}
+}
+
+func (r *Recorder) Write(ctx Context, event Event) error {
+	return r.Record(ctx.Index, event)
 }
 
 func (r *Recorder) Record(index int, event Event) error {
