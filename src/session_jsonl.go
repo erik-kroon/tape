@@ -13,17 +13,29 @@ type Recorder struct {
 	mu     sync.Mutex
 	file   *os.File
 	writer *bufio.Writer
+	codecs eventCodecRegistry
 }
 
 func NewRecorder(path string) (*Recorder, error) {
+	return NewRecorderWithCodecs(path)
+}
+
+func NewRecorderWithCodecs(path string, codecs ...EventCodec) (*Recorder, error) {
 	file, err := os.Create(path)
 	if err != nil {
+		return nil, err
+	}
+
+	registry, err := newEventCodecRegistry(codecs)
+	if err != nil {
+		file.Close()
 		return nil, err
 	}
 
 	return &Recorder{
 		file:   file,
 		writer: bufio.NewWriter(file),
+		codecs: registry,
 	}, nil
 }
 
@@ -42,7 +54,7 @@ func (r *Recorder) Record(index int, event Event) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	record, err := marshalSessionRecord(index, event)
+	record, err := r.codecs.Marshal(index, event)
 	if err != nil {
 		return err
 	}
@@ -68,31 +80,32 @@ func (r *Recorder) Close() error {
 	return r.file.Close()
 }
 
-func marshalSessionRecord(index int, event Event) ([]byte, error) {
-	switch typed := event.(type) {
-	case Tick:
-		return json.Marshal(sessionRecord{Type: typed.Type(), Tick: &typed, Index: index})
-	case Bar:
-		return json.Marshal(sessionRecord{Type: typed.Type(), Bar: &typed, Index: index})
-	default:
-		return nil, fmt.Errorf("sink error: unsupported event type %T", event)
-	}
-}
-
 type jsonlStream struct {
 	file    *os.File
 	scanner *bufio.Scanner
+	codecs  eventCodecRegistry
 }
 
 func OpenJSONLStream(path string) (Stream, error) {
+	return OpenJSONLStreamWithCodecs(path)
+}
+
+func OpenJSONLStreamWithCodecs(path string, codecs ...EventCodec) (Stream, error) {
 	file, err := os.Open(path)
 	if err != nil {
+		return nil, err
+	}
+
+	registry, err := newEventCodecRegistry(codecs)
+	if err != nil {
+		file.Close()
 		return nil, err
 	}
 
 	return &jsonlStream{
 		file:    file,
 		scanner: bufio.NewScanner(file),
+		codecs:  registry,
 	}, nil
 }
 
@@ -109,20 +122,7 @@ func (s *jsonlStream) Next() (Event, error) {
 		return nil, fmt.Errorf("decode error: invalid session record: %w", err)
 	}
 
-	switch record.Type {
-	case "tick":
-		if record.Tick == nil {
-			return nil, fmt.Errorf("decode error: tick record missing payload")
-		}
-		return *record.Tick, nil
-	case "bar":
-		if record.Bar == nil {
-			return nil, fmt.Errorf("decode error: bar record missing payload")
-		}
-		return *record.Bar, nil
-	default:
-		return nil, fmt.Errorf("decode error: unknown event type %q", record.Type)
-	}
+	return s.codecs.Decode(record)
 }
 
 func (s *jsonlStream) Close() error {

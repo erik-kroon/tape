@@ -9,16 +9,32 @@ import (
 type Hasher struct {
 	hash   hash.Hash
 	events int
+	codecs eventCodecRegistry
 }
 
 func NewHasher() *Hasher {
-	return &Hasher{hash: sha256.New()}
+	hasher, err := NewHasherWithCodecs()
+	if err != nil {
+		panic(err)
+	}
+	return hasher
+}
+
+func NewHasherWithCodecs(codecs ...EventCodec) (*Hasher, error) {
+	registry, err := newEventCodecRegistry(codecs)
+	if err != nil {
+		return nil, err
+	}
+	return &Hasher{
+		hash:   sha256.New(),
+		codecs: registry,
+	}, nil
 }
 
 func (h *Hasher) Middleware() Middleware {
 	return func(next EventHandler) EventHandler {
 		return func(ctx Context, event Event) error {
-			record, err := marshalSessionRecord(ctx.Index, event)
+			record, err := h.codecs.Marshal(ctx.Index, event)
 			if err != nil {
 				return err
 			}
@@ -51,7 +67,10 @@ func CheckDeterminism(path string, config Config, runs int) (DeterminismResult, 
 
 	for attempt := 0; attempt < runs; attempt++ {
 		engine := NewEngine(config)
-		hasher := NewHasher()
+		hasher, err := NewHasherWithCodecs(config.EventCodecs...)
+		if err != nil {
+			return DeterminismResult{}, err
+		}
 		engine.Use(hasher.Middleware())
 
 		summary, err := engine.RunFile(path)

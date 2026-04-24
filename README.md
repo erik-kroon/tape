@@ -91,3 +91,37 @@ func main() {
 This repository is an MVP scaffold aligned to the PRD. It focuses on deterministic local replay primitives and a usable CLI, not a full exchange simulator or backtesting framework.
 
 Replay summaries report event totals, wall-clock elapsed time, throughput, allocation volume, and error counts. The inspect command prints a short event sample to make recorded sessions easier to sanity-check from the terminal.
+
+## Custom event codecs
+
+Session recording, `.tape` replay, and determinism checks can be extended with custom event codecs:
+
+```go
+codec := tape.EventCodec{
+	Type: "headline",
+	Encode: func(event tape.Event) (json.RawMessage, error) {
+		headline, ok := event.(Headline)
+		if !ok {
+			return nil, fmt.Errorf("headline codec expected Headline, got %T", event)
+		}
+		return json.Marshal(headline)
+	},
+	Decode: func(payload json.RawMessage) (tape.Event, error) {
+		var headline Headline
+		if err := json.Unmarshal(payload, &headline); err != nil {
+			return nil, err
+		}
+		return headline, nil
+	},
+}
+
+recorder, err := tape.NewRecorderWithCodecs("session.tape", codec)
+if err != nil {
+	log.Fatal(err)
+}
+
+engine := tape.NewEngine(tape.Config{
+	Mode:        tape.MaxSpeedMode,
+	EventCodecs: []tape.EventCodec{codec},
+})
+```

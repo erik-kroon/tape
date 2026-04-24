@@ -1,8 +1,11 @@
 package tape_test
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -92,6 +95,148 @@ func TestCheckDeterminism(t *testing.T) {
 	}
 }
 
+func TestRecorderRoundTripWithCustomCodec(t *testing.T) {
+	recordingPath := filepath.Join(t.TempDir(), "custom-session.tape")
+	codec := headlineEventCodec()
+
+	recorder, err := tape.NewRecorderWithCodecs(recordingPath, codec)
+	if err != nil {
+		t.Fatalf("new recorder with codecs: %v", err)
+	}
+
+	source := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	source.Use(recorder.Middleware())
+	summary, err := source.Run(newEventStream(
+		headlineEvent{
+			Time:     time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC),
+			Sym:      "ERICB",
+			Headline: "Opening auction imbalance cleared",
+			Seq:      1,
+		},
+		headlineEvent{
+			Time:     time.Date(2026, 4, 24, 9, 30, 1, 0, time.UTC),
+			Sym:      "ERICB",
+			Headline: "Guidance reaffirmed",
+			Seq:      2,
+		},
+	))
+	if err != nil {
+		t.Fatalf("run custom stream: %v", err)
+	}
+	closeErr := recorder.Close()
+	if closeErr != nil {
+		t.Fatalf("close recorder: %v", closeErr)
+	}
+	if summary.Events != 2 {
+		t.Fatalf("events = %d, want 2", summary.Events)
+	}
+
+	var replayed []headlineEvent
+	replay := tape.NewEngine(tape.Config{
+		Mode:        tape.MaxSpeedMode,
+		EventCodecs: []tape.EventCodec{codec},
+	})
+	replay.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		headline, ok := event.(headlineEvent)
+		if !ok {
+			t.Fatalf("event type = %T, want headlineEvent", event)
+		}
+		replayed = append(replayed, headline)
+		return nil
+	})
+
+	replayedSummary, err := replay.RunFile(recordingPath)
+	if err != nil {
+		t.Fatalf("replay custom recording: %v", err)
+	}
+	if replayedSummary.Events != 2 {
+		t.Fatalf("replayed events = %d, want 2", replayedSummary.Events)
+	}
+	if replayedSummary.EventTypes["headline"] != 2 {
+		t.Fatalf("headline count = %d, want 2", replayedSummary.EventTypes["headline"])
+	}
+	if len(replayed) != 2 {
+		t.Fatalf("replayed len = %d, want 2", len(replayed))
+	}
+	if replayed[0].Headline != "Opening auction imbalance cleared" {
+		t.Fatalf("headline[0] = %q, want %q", replayed[0].Headline, "Opening auction imbalance cleared")
+	}
+	if replayed[1].Headline != "Guidance reaffirmed" {
+		t.Fatalf("headline[1] = %q, want %q", replayed[1].Headline, "Guidance reaffirmed")
+	}
+}
+
+func TestCheckDeterminismWithCustomCodec(t *testing.T) {
+	recordingPath := filepath.Join(t.TempDir(), "custom-session.tape")
+	codec := headlineEventCodec()
+
+	recorder, err := tape.NewRecorderWithCodecs(recordingPath, codec)
+	if err != nil {
+		t.Fatalf("new recorder with codecs: %v", err)
+	}
+
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	engine.Use(recorder.Middleware())
+	_, err = engine.Run(newEventStream(
+		headlineEvent{
+			Time:     time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC),
+			Sym:      "ERICB",
+			Headline: "Opening auction imbalance cleared",
+			Seq:      1,
+		},
+		headlineEvent{
+			Time:     time.Date(2026, 4, 24, 9, 30, 1, 0, time.UTC),
+			Sym:      "ERICB",
+			Headline: "Guidance reaffirmed",
+			Seq:      2,
+		},
+	))
+	closeErr := recorder.Close()
+	if err != nil {
+		t.Fatalf("run custom stream: %v", err)
+	}
+	if closeErr != nil {
+		t.Fatalf("close recorder: %v", closeErr)
+	}
+
+	result, err := tape.CheckDeterminism(recordingPath, tape.Config{
+		Mode:        tape.MaxSpeedMode,
+		EventCodecs: []tape.EventCodec{codec},
+	}, 3)
+	if err != nil {
+		t.Fatalf("check determinism with codecs: %v", err)
+	}
+	if result.Runs != 3 {
+		t.Fatalf("runs = %d, want 3", result.Runs)
+	}
+	if result.Events != 2 {
+		t.Fatalf("events = %d, want 2", result.Events)
+	}
+	if len(result.Hash) != 64 {
+		t.Fatalf("hash length = %d, want 64", len(result.Hash))
+	}
+}
+
+func TestRunFileSupportsLegacySessionRecords(t *testing.T) {
+	recordingPath := filepath.Join(t.TempDir(), "legacy-session.tape")
+	record := `{"type":"tick","tick":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":93.12,"size":10,"seq":1},"index":0}` + "\n"
+	if err := os.WriteFile(recordingPath, []byte(record), 0o600); err != nil {
+		t.Fatalf("write legacy record: %v", err)
+	}
+
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	summary, err := engine.RunFile(recordingPath)
+	if err != nil {
+		t.Fatalf("run legacy recording: %v", err)
+	}
+	if summary.Events != 1 {
+		t.Fatalf("events = %d, want 1", summary.Events)
+	}
+	if summary.EventTypes["tick"] != 1 {
+		t.Fatalf("tick count = %d, want 1", summary.EventTypes["tick"])
+	}
+}
+
 func TestContextClockExposesReplayTime(t *testing.T) {
 	timestamps := []time.Time{
 		time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC),
@@ -176,4 +321,36 @@ func (s *eventStream) Next() (tape.Event, error) {
 
 func (s *eventStream) Close() error {
 	return nil
+}
+
+type headlineEvent struct {
+	Time     time.Time `json:"time"`
+	Sym      string    `json:"symbol"`
+	Headline string    `json:"headline"`
+	Seq      int64     `json:"seq,omitempty"`
+}
+
+func (h headlineEvent) Type() string         { return "headline" }
+func (h headlineEvent) Symbol() string       { return h.Sym }
+func (h headlineEvent) Timestamp() time.Time { return h.Time }
+func (h headlineEvent) Sequence() int64      { return h.Seq }
+
+func headlineEventCodec() tape.EventCodec {
+	return tape.EventCodec{
+		Type: "headline",
+		Encode: func(event tape.Event) (json.RawMessage, error) {
+			headline, ok := event.(headlineEvent)
+			if !ok {
+				return nil, fmt.Errorf("headline codec expected headlineEvent, got %T", event)
+			}
+			return json.Marshal(headline)
+		},
+		Decode: func(payload json.RawMessage) (tape.Event, error) {
+			var headline headlineEvent
+			if err := json.Unmarshal(payload, &headline); err != nil {
+				return nil, err
+			}
+			return headline, nil
+		},
+	}
 }

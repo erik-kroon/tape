@@ -1,6 +1,10 @@
 package tape
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 type Event interface {
 	Type() string
@@ -39,8 +43,30 @@ func (b Bar) Timestamp() time.Time { return b.Time }
 func (b Bar) Sequence() int64      { return b.Seq }
 
 type sessionRecord struct {
-	Type  string `json:"type"`
-	Tick  *Tick  `json:"tick,omitempty"`
-	Bar   *Bar   `json:"bar,omitempty"`
-	Index int    `json:"index,omitempty"`
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+	Tick    *Tick           `json:"tick,omitempty"`
+	Bar     *Bar            `json:"bar,omitempty"`
+	Index   int             `json:"index,omitempty"`
+}
+
+func (r sessionRecord) payload() (json.RawMessage, error) {
+	if len(r.Payload) > 0 {
+		return r.Payload, nil
+	}
+
+	switch r.Type {
+	case "tick":
+		if r.Tick == nil {
+			return nil, fmt.Errorf("decode error: tick record missing payload")
+		}
+		return json.Marshal(r.Tick)
+	case "bar":
+		if r.Bar == nil {
+			return nil, fmt.Errorf("decode error: bar record missing payload")
+		}
+		return json.Marshal(r.Bar)
+	default:
+		return nil, fmt.Errorf("decode error: %s record missing payload", r.Type)
+	}
 }
