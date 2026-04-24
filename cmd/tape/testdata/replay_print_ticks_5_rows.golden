@@ -1,0 +1,5 @@
+seq=1 time=2026-04-24T09:30:00Z symbol=ERICB price=92.5000 size=100.0000
+seq=2 time=2026-04-24T09:30:00.25Z symbol=ERICB price=92.5500 size=75.0000
+seq=3 time=2026-04-24T09:30:00.5Z symbol=ERICB price=92.5300 size=80.0000
+seq=4 time=2026-04-24T09:30:00.75Z symbol=ERICB price=92.6000 size=60.0000
+seq=5 time=2026-04-24T09:30:01Z symbol=ERICB price=92.5800 size=90.0000

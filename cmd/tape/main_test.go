@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/erik-kroon/tape/internal/testutil/golden"
 )
 
 func TestRunInspectShowsSampleEvents(t *testing.T) {
@@ -21,17 +23,7 @@ func TestRunInspectShowsSampleEvents(t *testing.T) {
 		}
 	})
 
-	for _, fragment := range []string{
-		"Events:      5",
-		"Sample:",
-		"seq=1",
-		"seq=2",
-		"price=",
-	} {
-		if !strings.Contains(output, fragment) {
-			t.Fatalf("output missing %q\n%s", fragment, output)
-		}
-	}
+	golden.Assert(t, filepath.Join("testdata", "inspect_sample_ticks_5_rows.golden"), output)
 }
 
 func TestRunReplayPrintsEvents(t *testing.T) {
@@ -47,16 +39,7 @@ func TestRunReplayPrintsEvents(t *testing.T) {
 		}
 	})
 
-	for _, fragment := range []string{
-		"seq=1",
-		"seq=5",
-		"symbol=ERICB",
-		"price=",
-	} {
-		if !strings.Contains(output, fragment) {
-			t.Fatalf("output missing %q\n%s", fragment, output)
-		}
-	}
+	golden.Assert(t, filepath.Join("testdata", "replay_print_ticks_5_rows.golden"), output)
 }
 
 func TestRunReplayRecordsEvents(t *testing.T) {

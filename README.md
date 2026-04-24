@@ -95,6 +95,22 @@ Runnable example:
 go run ./examples/benchmark
 ```
 
+## Golden replay tests
+
+CLI output regressions are pinned with golden files in `cmd/tape/testdata`.
+
+Run the package tests normally:
+
+```bash
+go test ./cmd/tape
+```
+
+Refresh the golden files only when an output change is intentional:
+
+```bash
+UPDATE_GOLDEN=1 go test ./cmd/tape
+```
+
 ## Use as a library
 
 ```go
