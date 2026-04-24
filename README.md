@@ -33,6 +33,13 @@ tape replay testdata/bars_5_rows.csv --speed 100x --metrics
 tape replay testdata/bars_5_rows.csv --symbol ERICB --event-type bar --from 2026-04-24T09:31:00Z --to 2026-04-24T09:33:00Z
 ```
 
+## Seek to a starting position
+
+```bash
+tape replay testdata/ticks_5_rows.csv --start-at 2026-04-24T09:30:00.500Z
+tape inspect testdata/ticks_5_rows.csv --start-at 4 --sample 2
+```
+
 ## Step through a session
 
 ```bash
@@ -99,6 +106,8 @@ This repository is an MVP scaffold aligned to the PRD. It focuses on determinist
 Replay summaries report event totals, wall-clock elapsed time, throughput, allocation volume, and error counts. The inspect command prints a short event sample to make recorded sessions easier to sanity-check from the terminal.
 
 `replay`, `inspect`, and `check` all support the same inclusive filters: `--symbol` for one or more comma-separated symbols, `--event-type` for one or more comma-separated event types, and `--from` / `--to` for RFC3339 time bounds.
+
+Those commands also support `--start-at` to seek before replay begins. `--start-at` accepts an RFC3339 timestamp, a `YYYY-MM-DD` date, or a sequence number, and starts from the first event at or after that position.
 
 ## Custom event codecs
 

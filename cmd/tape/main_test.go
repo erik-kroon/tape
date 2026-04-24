@@ -94,6 +94,75 @@ func TestRunInspectRejectsInvalidTimeRange(t *testing.T) {
 	}
 }
 
+func TestRunInspectStartAtTimestampSkipsEarlierEvents(t *testing.T) {
+	output := captureStdout(t, func() {
+		err := run([]string{
+			"inspect",
+			filepath.Join("..", "..", "testdata", "ticks_5_rows.csv"),
+			"--start-at", "2026-04-24T09:30:00.500Z",
+			"--sample", "2",
+		})
+		if err != nil {
+			t.Fatalf("run inspect: %v", err)
+		}
+	})
+
+	for _, fragment := range []string{
+		"Events:      3",
+		"First event: 2026-04-24T09:30:00.5Z",
+		"seq=1 time=2026-04-24T09:30:00.5Z symbol=ERICB",
+		"seq=2 time=2026-04-24T09:30:00.75Z symbol=ERICB",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output missing %q\n%s", fragment, output)
+		}
+	}
+	if strings.Contains(output, "09:30:00.25Z") || strings.Contains(output, "price=92.5000") {
+		t.Fatalf("output unexpectedly contains events before start-at\n%s", output)
+	}
+}
+
+func TestRunInspectStartAtSequenceSkipsEarlierEvents(t *testing.T) {
+	output := captureStdout(t, func() {
+		err := run([]string{
+			"inspect",
+			filepath.Join("..", "..", "testdata", "ticks_5_rows.csv"),
+			"--start-at", "4",
+			"--sample", "2",
+		})
+		if err != nil {
+			t.Fatalf("run inspect: %v", err)
+		}
+	})
+
+	for _, fragment := range []string{
+		"Events:      2",
+		"seq=1 time=2026-04-24T09:30:00.75Z symbol=ERICB",
+		"seq=2 time=2026-04-24T09:30:01Z symbol=ERICB",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output missing %q\n%s", fragment, output)
+		}
+	}
+	if strings.Contains(output, "09:30:00.5Z") {
+		t.Fatalf("output unexpectedly contains sequence before start-at\n%s", output)
+	}
+}
+
+func TestRunInspectRejectsInvalidStartAt(t *testing.T) {
+	err := run([]string{
+		"inspect",
+		filepath.Join("..", "..", "testdata", "ticks_5_rows.csv"),
+		"--start-at", "not-a-position",
+	})
+	if err == nil {
+		t.Fatal("run inspect error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "start-at") {
+		t.Fatalf("error = %v, want start-at error", err)
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 

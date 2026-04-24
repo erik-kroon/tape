@@ -1,8 +1,10 @@
 package tape
 
 import (
+	"fmt"
 	"io"
 	"os"
+	"time"
 )
 
 type Mode string
@@ -19,6 +21,7 @@ type Config struct {
 	Speed       float64
 	Permissive  bool
 	Filter      Filter
+	StartAt     StartAt
 	StepReader  io.Reader
 	StepWriter  io.Writer
 	EventCodecs []EventCodec
@@ -42,5 +45,38 @@ func (c Config) normalized() Config {
 }
 
 func (c Config) validate() error {
+	if err := c.StartAt.validate(); err != nil {
+		return err
+	}
 	return c.Filter.validate()
+}
+
+type StartAt struct {
+	Time     time.Time
+	Sequence int64
+}
+
+func (s StartAt) Active() bool {
+	return !s.Time.IsZero() || s.Sequence > 0
+}
+
+func (s StartAt) validate() error {
+	if !s.Time.IsZero() && s.Sequence > 0 {
+		return fmt.Errorf("config error: start-at supports either time or sequence, not both")
+	}
+	if s.Sequence < 0 {
+		return fmt.Errorf("config error: start-at sequence must be non-negative")
+	}
+	return nil
+}
+
+func (s StartAt) Reached(event Event) bool {
+	switch {
+	case !s.Time.IsZero():
+		return !event.Timestamp().Before(s.Time)
+	case s.Sequence > 0:
+		return event.Sequence() >= s.Sequence
+	default:
+		return true
+	}
 }
