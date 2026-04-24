@@ -2,19 +2,18 @@
 
 Tape is a deterministic market-event replay engine for Go.
 
-It helps developers replay, inspect, test, and benchmark trading pipelines using historical CSV data, Parquet datasets, synthetic event streams, or recorded JSONL sessions.
+It is built for replaying historical ticks and bars through trading or analytics code with repeatable timing and consistent ordering. Tape can read CSV files, flat Parquet files, synthetic event streams, and recorded JSONL sessions stored as `.tape` files.
 
 Tape does not execute trades and does not provide financial advice.
 
-## What is included
+## What Tape Includes
 
-- A small Go library with `Tick` and `Bar` event types
+- A Go library with `Tick`, `Bar`, and shared event interfaces
 - A replay engine with max-speed, real-time, accelerated, and step modes
-- Output sinks for replayed events
+- CLI commands for replaying, sampling, benchmarking, validating, and indexing data
 - CSV and Parquet readers for tick and OHLCV bar data
-- JSONL session recording and replay through `.tape` files
-- A CLI with `replay`, `inspect`, `bench`, and `check`
-- Tests and fixture data for the core replay loop
+- Session recording and replay through `.tape` files
+- Determinism checks and test fixtures for the core replay loop
 
 ## Install
 
@@ -22,46 +21,56 @@ Tape does not execute trades and does not provide financial advice.
 go install github.com/erik-kroon/tape/cmd/tape@latest
 ```
 
-Parquet support is powered by [`github.com/parquet-go/parquet-go`](https://github.com/parquet-go/parquet-go), so the module now tracks that dependency's current Go floor: `go 1.24.9`.
+Tape currently targets `go 1.24.9`, matching the floor required by `github.com/parquet-go/parquet-go`.
 
-## Replay a CSV file
+## Quick Start
+
+Replay a CSV file:
 
 ```bash
 tape replay testdata/bars_5_rows.csv --speed 100x --metrics
 ```
 
-## Replay a Parquet file
+Replay a Parquet file:
 
 ```bash
 tape replay testdata/bars_5_rows.parquet --speed max --metrics
 ```
 
-Runnable example:
+Replay only a filtered slice:
 
 ```bash
-go run ./examples/replay
+tape replay testdata/bars_5_rows.csv \
+  --symbol ERICB \
+  --event-type bar \
+  --from 2026-04-24T09:31:00Z \
+  --to 2026-04-24T09:33:00Z
 ```
 
-## Replay a filtered subset
+Step through events manually:
 
 ```bash
-tape replay testdata/bars_5_rows.csv --symbol ERICB --event-type bar --from 2026-04-24T09:31:00Z --to 2026-04-24T09:33:00Z
+tape replay testdata/ticks_5_rows.csv --step
 ```
 
-## Seek to a starting position
+Seek to a starting position:
 
 ```bash
 tape replay testdata/ticks_5_rows.csv --start-at 2026-04-24T09:30:00.500Z
 tape inspect testdata/ticks_5_rows.csv --start-at 4 --sample 2
 ```
 
-## Step through a session
+## CLI Commands
+
+### `replay`
+
+Replays events from a file through the engine.
 
 ```bash
-tape replay testdata/ticks_5_rows.csv --step
+tape replay <path> [--speed max|realtime|100x] [--step] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
 ```
 
-## Record to a session file
+Use `--record` to capture the replay into a `.tape` session:
 
 ```bash
 tape replay testdata/ticks_5_rows.csv --record sessions/opening-bell.tape
@@ -70,57 +79,91 @@ tape replay testdata/ticks_5_rows.csv --record sessions/opening-bell.tape
 Runnable example:
 
 ```bash
+go run ./examples/replay
 go run ./examples/record_replay
 ```
 
-## Inspect a recording
+### `inspect`
+
+Prints a small sample of events from a source without replaying the full stream.
+
+```bash
+tape inspect <path> [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
+```
+
+Example:
 
 ```bash
 tape inspect sessions/opening-bell.tape --sample 5
 ```
 
-Tape recordings automatically write a `.idx` sidecar on close so `--start-at` can jump directly into large sessions. Existing recordings can be indexed or reindexed with:
+### `check`
+
+Runs the same input multiple times and verifies deterministic output.
 
 ```bash
-tape index sessions/opening-bell.tape
+tape check <path> [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
 ```
 
-## Run a determinism check
+Examples:
 
 ```bash
 tape check testdata/bars_5_rows.csv --runs 5
 tape check testdata/bars_5_rows.parquet --runs 5
 ```
 
-## Run a synthetic benchmark
+### `bench`
+
+Generates synthetic events and reports replay performance.
+
+```bash
+tape bench [--events N] [--symbols N]
+```
+
+Example:
 
 ```bash
 tape bench --events 1000000 --symbols 100
-```
-
-Runnable example:
-
-```bash
 go run ./examples/benchmark
 ```
 
-## Golden replay tests
+### `index`
 
-CLI output regressions are pinned with golden files in `cmd/tape/testdata`.
-
-Run the package tests normally:
+Builds or rebuilds a session index for `.tape` files.
 
 ```bash
-go test ./cmd/tape
+tape index <path>
 ```
 
-Refresh the golden files only when an output change is intentional:
+Example:
 
 ```bash
-UPDATE_GOLDEN=1 go test ./cmd/tape
+tape index sessions/opening-bell.tape
 ```
 
-## Use as a library
+## Filters and Start Positions
+
+`replay`, `inspect`, and `check` all support the same inclusive filters:
+
+- `--symbol` for one or more comma-separated symbols
+- `--event-type` for one or more comma-separated event types
+- `--from` and `--to` for RFC3339 time bounds
+
+Those commands also support `--start-at` to seek before processing begins. `--start-at` accepts:
+
+- An RFC3339 timestamp
+- A `YYYY-MM-DD` date
+- A non-negative sequence number
+
+Processing starts from the first event at or after that position.
+
+## Session Files
+
+Tape can record event streams into `.tape` files and replay them later with the same engine and filters used for CSV or Parquet input.
+
+When a recording closes, Tape writes a `.idx` sidecar automatically. That index allows direct seeks into large `.tape` and `.jsonl` sessions when `--start-at` is used. If the index is missing or stale, Tape falls back to a linear scan.
+
+## Use as a Library
 
 ```go
 package main
@@ -154,38 +197,30 @@ func main() {
 }
 ```
 
-## Current scope
-
-This repository is an MVP scaffold aligned to the PRD. It focuses on deterministic local replay primitives and a usable CLI, not a full exchange simulator or backtesting framework.
-
-Replay summaries report event totals, wall-clock elapsed time, throughput, allocation volume, and error counts. The inspect command prints a short event sample to make recorded sessions easier to sanity-check from the terminal.
-
-`replay`, `inspect`, and `check` all support the same inclusive filters: `--symbol` for one or more comma-separated symbols, `--event-type` for one or more comma-separated event types, and `--from` / `--to` for RFC3339 time bounds.
-
-Those commands also support `--start-at` to seek before replay begins. `--start-at` accepts an RFC3339 timestamp, a `YYYY-MM-DD` date, or a sequence number, and starts from the first event at or after that position.
-
-When a valid `.tape.idx` sidecar is present, Tape uses it automatically for `.tape` and `.jsonl` sessions. Missing or stale indexes fall back to the normal linear scan.
+Replay summaries include event totals, elapsed wall time, throughput, allocation volume, and error counts.
 
 ## Supported Parquet Schemas
 
 Tape currently supports flat Parquet files for two event families:
 
-- Tick rows: a timestamp column named `timestamp`, `time`, or `ts`; a symbol column named `symbol`, `ticker`, or `instrument`; a price column named `price` or `last`; optional size columns named `size`, `qty`, `quantity`, or `volume`; and an optional sequence column named `seq` or `sequence`.
-- Bar rows: a timestamp column named `timestamp`, `time`, or `ts`; a symbol column named `symbol`, `ticker`, or `instrument`; required `open`, `high`, `low`, and `close` columns; an optional `volume` column; and an optional sequence column named `seq` or `sequence`.
+- Tick rows: a timestamp column named `timestamp`, `time`, or `ts`; a symbol column named `symbol`, `ticker`, or `instrument`; a price column named `price` or `last`; optional size columns named `size`, `qty`, `quantity`, or `volume`; and an optional sequence column named `seq` or `sequence`
+- Bar rows: a timestamp column named `timestamp`, `time`, or `ts`; a symbol column named `symbol`, `ticker`, or `instrument`; required `open`, `high`, `low`, and `close` columns; an optional `volume` column; and an optional sequence column named `seq` or `sequence`
 
-The timestamp columns must be stored as Parquet `TIMESTAMP` logical types. The current adapter is intentionally narrow: it expects a single flat file with top-level columns and does not try to interpret nested schemas or partitioned dataset layouts.
+Timestamp columns must use the Parquet `TIMESTAMP` logical type.
 
-## Parquet Performance Notes
+The current adapter expects a single flat file with top-level columns. It does not interpret nested schemas or partitioned dataset layouts.
 
-Parquet input is read sequentially and converted back into Tape events row by row. This is a good fit for replaying larger historical files without first converting them to CSV, but it is not yet a query engine:
+## Parquet Notes
 
-- Tape does not currently use Parquet predicate pushdown or column projection to skip work.
-- Replay still validates event ordering and applies filters after row decode, just like CSV and `.tape` inputs.
-- You should expect better storage efficiency than CSV and similar replay semantics, but not warehouse-style scan optimizations.
+Parquet input is read sequentially and converted into Tape events row by row. That works well for replaying larger historical files without converting them to CSV first, but it is still a replay pipeline rather than a query engine.
 
-## Custom event codecs
+- Tape does not currently use predicate pushdown
+- Tape does not currently use column projection
+- Replay still validates ordering and applies filters after decoding
 
-Session recording, `.tape` replay, and determinism checks can be extended with custom event codecs:
+## Custom Event Codecs
+
+Session recording, `.tape` replay, and determinism checks can be extended with custom codecs:
 
 ```go
 codec := tape.EventCodec{
@@ -215,4 +250,20 @@ engine := tape.NewEngine(tape.Config{
 	Mode:        tape.MaxSpeedMode,
 	EventCodecs: []tape.EventCodec{codec},
 })
+```
+
+## Development
+
+CLI output regressions are covered with golden files in `cmd/tape/testdata`.
+
+Run tests:
+
+```bash
+go test ./...
+```
+
+Refresh golden files only when an output change is intentional:
+
+```bash
+UPDATE_GOLDEN=1 go test ./cmd/tape
 ```
