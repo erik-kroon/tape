@@ -52,18 +52,31 @@ func runReplay(args []string) error {
 	metrics := flags.Bool("metrics", true, "print replay summary")
 	recordPath := flags.String("record", "", "record events to a .tape file")
 	permissive := flags.Bool("permissive", false, "continue through out-of-order timestamps")
+	symbols := flags.String("symbol", "", "comma-separated symbol filters")
+	eventTypes := flags.String("event-type", "", "comma-separated event-type filters")
+	from := flags.String("from", "", "inclusive replay start time (RFC3339)")
+	to := flags.String("to", "", "inclusive replay end time (RFC3339)")
 	flags.SetOutput(os.Stderr)
 	if err := flags.Parse(reorderArgs(args, map[string]bool{
-		"--speed":  true,
-		"--record": true,
+		"--speed":      true,
+		"--record":     true,
+		"--symbol":     true,
+		"--event-type": true,
+		"--from":       true,
+		"--to":         true,
 	})); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: tape replay <path> [--speed max|realtime|100x] [--step]")
+		return errors.New("usage: tape replay <path> [--speed max|realtime|100x] [--step] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339]")
 	}
 
-	config, err := configFromFlags(*speed, *step, *permissive)
+	filter, err := filterFromFlags(*symbols, *eventTypes, *from, *to)
+	if err != nil {
+		return err
+	}
+
+	config, err := configFromFlags(*speed, *step, *permissive, filter)
 	if err != nil {
 		return err
 	}
@@ -100,23 +113,41 @@ func runInspect(args []string) error {
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
 	sample := flags.Int("sample", 3, "number of sample events to print")
 	permissive := flags.Bool("permissive", false, "continue through out-of-order timestamps")
+	symbols := flags.String("symbol", "", "comma-separated symbol filters")
+	eventTypes := flags.String("event-type", "", "comma-separated event-type filters")
+	from := flags.String("from", "", "inclusive replay start time (RFC3339)")
+	to := flags.String("to", "", "inclusive replay end time (RFC3339)")
 	flags.SetOutput(os.Stderr)
 	if err := flags.Parse(reorderArgs(args, map[string]bool{
-		"--sample": true,
+		"--sample":     true,
+		"--symbol":     true,
+		"--event-type": true,
+		"--from":       true,
+		"--to":         true,
 	})); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: tape inspect <path> [--sample N]")
+		return errors.New("usage: tape inspect <path> [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339]")
+	}
+
+	filter, err := filterFromFlags(*symbols, *eventTypes, *from, *to)
+	if err != nil {
+		return err
 	}
 
 	path := flags.Arg(0)
-	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode, Permissive: *permissive})
+	config := tape.Config{
+		Mode:       tape.MaxSpeedMode,
+		Permissive: *permissive,
+		Filter:     filter,
+	}
+	engine := tape.NewEngine(config)
 	summary, err := engine.RunFile(path)
 	if err != nil {
 		return err
 	}
-	samples, err := sampleEvents(path, *sample)
+	samples, err := sampleEvents(path, *sample, filter)
 	if err != nil {
 		return err
 	}
@@ -166,19 +197,33 @@ func runCheck(args []string) error {
 	flags := flag.NewFlagSet("check", flag.ContinueOnError)
 	runs := flags.Int("runs", 5, "number of replay runs")
 	permissive := flags.Bool("permissive", false, "continue through out-of-order timestamps")
+	symbols := flags.String("symbol", "", "comma-separated symbol filters")
+	eventTypes := flags.String("event-type", "", "comma-separated event-type filters")
+	from := flags.String("from", "", "inclusive replay start time (RFC3339)")
+	to := flags.String("to", "", "inclusive replay end time (RFC3339)")
 	flags.SetOutput(os.Stderr)
 	if err := flags.Parse(reorderArgs(args, map[string]bool{
-		"--runs": true,
+		"--runs":       true,
+		"--symbol":     true,
+		"--event-type": true,
+		"--from":       true,
+		"--to":         true,
 	})); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: tape check <path> [--runs N]")
+		return errors.New("usage: tape check <path> [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339]")
+	}
+
+	filter, err := filterFromFlags(*symbols, *eventTypes, *from, *to)
+	if err != nil {
+		return err
 	}
 
 	result, err := tape.CheckDeterminism(flags.Arg(0), tape.Config{
 		Mode:       tape.MaxSpeedMode,
 		Permissive: *permissive,
+		Filter:     filter,
 	}, *runs)
 	if err != nil {
 		return err
@@ -192,17 +237,17 @@ func runCheck(args []string) error {
 	return nil
 }
 
-func configFromFlags(speed string, step bool, permissive bool) (tape.Config, error) {
+func configFromFlags(speed string, step bool, permissive bool, filter tape.Filter) (tape.Config, error) {
 	if step {
-		return tape.Config{Mode: tape.StepMode, Permissive: permissive}, nil
+		return tape.Config{Mode: tape.StepMode, Permissive: permissive, Filter: filter}, nil
 	}
 
 	normalized := strings.ToLower(strings.TrimSpace(speed))
 	switch normalized {
 	case "", "max":
-		return tape.Config{Mode: tape.MaxSpeedMode, Permissive: permissive}, nil
+		return tape.Config{Mode: tape.MaxSpeedMode, Permissive: permissive, Filter: filter}, nil
 	case "realtime", "real-time", "1x":
-		return tape.Config{Mode: tape.RealTimeMode, Speed: 1, Permissive: permissive}, nil
+		return tape.Config{Mode: tape.RealTimeMode, Speed: 1, Permissive: permissive, Filter: filter}, nil
 	default:
 		if !strings.HasSuffix(normalized, "x") {
 			return tape.Config{}, fmt.Errorf("config error: invalid speed %q", speed)
@@ -211,7 +256,7 @@ func configFromFlags(speed string, step bool, permissive bool) (tape.Config, err
 		if err != nil || value <= 0 {
 			return tape.Config{}, fmt.Errorf("config error: invalid speed %q", speed)
 		}
-		return tape.Config{Mode: tape.AcceleratedMode, Speed: value, Permissive: permissive}, nil
+		return tape.Config{Mode: tape.AcceleratedMode, Speed: value, Permissive: permissive, Filter: filter}, nil
 	}
 }
 
@@ -221,6 +266,7 @@ func printSummary(summary tape.Summary) {
 	fmt.Printf("First event:  %s\n", formatTimestamp(summary.FirstEventTime))
 	fmt.Printf("Last event:   %s\n", formatTimestamp(summary.LastEventTime))
 	fmt.Printf("Elapsed:      %s\n", summary.WallDuration.Round(time.Microsecond))
+	fmt.Printf("Handler time: %s\n", summary.HandlerDuration.Round(time.Microsecond))
 	fmt.Printf("Throughput:   %.0f events/sec\n", summary.Throughput)
 	fmt.Printf("Allocations:  %s\n", formatBytes(summary.AllocBytes))
 	fmt.Printf("Errors:       %d\n", summary.ErrorCount)
@@ -269,13 +315,13 @@ func printUsage() {
 	fmt.Println("Tape: deterministic market replay for Go")
 	fmt.Println()
 	fmt.Println("Usage:")
-	fmt.Println("  tape replay <path> [--speed max|realtime|100x] [--step]")
-	fmt.Println("  tape inspect <path> [--sample N]")
+	fmt.Println("  tape replay <path> [--speed max|realtime|100x] [--step] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339]")
+	fmt.Println("  tape inspect <path> [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339]")
 	fmt.Println("  tape bench [--events N] [--symbols N]")
-	fmt.Println("  tape check <path> [--runs N]")
+	fmt.Println("  tape check <path> [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339]")
 }
 
-func sampleEvents(path string, limit int) ([]tape.Event, error) {
+func sampleEvents(path string, limit int, filter tape.Filter) ([]tape.Event, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
@@ -295,10 +341,67 @@ func sampleEvents(path string, limit int) ([]tape.Event, error) {
 			}
 			return nil, err
 		}
+		if !filter.Matches(event) {
+			continue
+		}
 		samples = append(samples, event)
 	}
 
 	return samples, nil
+}
+
+func filterFromFlags(symbols string, eventTypes string, from string, to string) (tape.Filter, error) {
+	startTime, err := parseFilterTime("from", from)
+	if err != nil {
+		return tape.Filter{}, err
+	}
+	endTime, err := parseFilterTime("to", to)
+	if err != nil {
+		return tape.Filter{}, err
+	}
+
+	return tape.Filter{
+		Symbols:    splitFilterValues(symbols),
+		EventTypes: splitFilterValues(eventTypes),
+		StartTime:  startTime,
+		EndTime:    endTime,
+	}, nil
+}
+
+func splitFilterValues(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	values := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value == "" {
+			continue
+		}
+		values = append(values, value)
+	}
+
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func parseFilterTime(name string, raw string) (time.Time, error) {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}, nil
+	}
+
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02"} {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			return parsed, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("config error: invalid %s time %q", name, raw)
 }
 
 func formatBytes(total uint64) string {

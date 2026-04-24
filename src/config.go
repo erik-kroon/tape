@@ -18,6 +18,7 @@ type Config struct {
 	Mode        Mode
 	Speed       float64
 	Permissive  bool
+	Filter      Filter
 	StepReader  io.Reader
 	StepWriter  io.Writer
 	EventCodecs []EventCodec
@@ -36,5 +37,10 @@ func (c Config) normalized() Config {
 	if c.StepWriter == nil {
 		c.StepWriter = os.Stdout
 	}
+	c.Filter = c.Filter.normalized()
 	return c
+}
+
+func (c Config) validate() error {
+	return c.Filter.validate()
 }
