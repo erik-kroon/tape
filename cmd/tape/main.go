@@ -4,13 +4,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/erik-kroon/tape"
+	tape "github.com/erik-kroon/tape/src"
 )
 
 func main() {
@@ -97,17 +98,25 @@ func runReplay(args []string) error {
 
 func runInspect(args []string) error {
 	flags := flag.NewFlagSet("inspect", flag.ContinueOnError)
+	sample := flags.Int("sample", 3, "number of sample events to print")
 	permissive := flags.Bool("permissive", false, "continue through out-of-order timestamps")
 	flags.SetOutput(os.Stderr)
-	if err := flags.Parse(reorderArgs(args, nil)); err != nil {
+	if err := flags.Parse(reorderArgs(args, map[string]bool{
+		"--sample": true,
+	})); err != nil {
 		return err
 	}
 	if flags.NArg() != 1 {
-		return errors.New("usage: tape inspect <path>")
+		return errors.New("usage: tape inspect <path> [--sample N]")
 	}
 
+	path := flags.Arg(0)
 	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode, Permissive: *permissive})
-	summary, err := engine.RunFile(flags.Arg(0))
+	summary, err := engine.RunFile(path)
+	if err != nil {
+		return err
+	}
+	samples, err := sampleEvents(path, *sample)
 	if err != nil {
 		return err
 	}
@@ -117,6 +126,12 @@ func runInspect(args []string) error {
 	fmt.Printf("Last event:  %s\n", formatTimestamp(summary.LastEventTime))
 	fmt.Printf("Types:       %s\n", formatCountMap(summary.EventTypes))
 	fmt.Printf("Symbols:     %s\n", formatCountMap(summary.Symbols))
+	if len(samples) > 0 {
+		fmt.Println("Sample:")
+		for index, event := range samples {
+			fmt.Printf("  %s\n", formatEvent(index, event))
+		}
+	}
 	return nil
 }
 
@@ -206,6 +221,9 @@ func printSummary(summary tape.Summary) {
 	fmt.Printf("First event:  %s\n", formatTimestamp(summary.FirstEventTime))
 	fmt.Printf("Last event:   %s\n", formatTimestamp(summary.LastEventTime))
 	fmt.Printf("Elapsed:      %s\n", summary.WallDuration.Round(time.Microsecond))
+	fmt.Printf("Throughput:   %.0f events/sec\n", summary.Throughput)
+	fmt.Printf("Allocations:  %s\n", formatBytes(summary.AllocBytes))
+	fmt.Printf("Errors:       %d\n", summary.ErrorCount)
 	fmt.Printf("Types:        %s\n", formatCountMap(summary.EventTypes))
 	fmt.Printf("Symbols:      %s\n", formatCountMap(summary.Symbols))
 }
@@ -252,9 +270,51 @@ func printUsage() {
 	fmt.Println()
 	fmt.Println("Usage:")
 	fmt.Println("  tape replay <path> [--speed max|realtime|100x] [--step]")
-	fmt.Println("  tape inspect <path>")
+	fmt.Println("  tape inspect <path> [--sample N]")
 	fmt.Println("  tape bench [--events N] [--symbols N]")
 	fmt.Println("  tape check <path> [--runs N]")
+}
+
+func sampleEvents(path string, limit int) ([]tape.Event, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	stream, err := tape.OpenStream(path)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+
+	samples := make([]tape.Event, 0, limit)
+	for len(samples) < limit {
+		event, err := stream.Next()
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return samples, nil
+			}
+			return nil, err
+		}
+		samples = append(samples, event)
+	}
+
+	return samples, nil
+}
+
+func formatBytes(total uint64) string {
+	const unit = 1024
+	if total < unit {
+		return fmt.Sprintf("%d B", total)
+	}
+
+	div := uint64(unit)
+	exp := 0
+	for value := total / unit; value >= unit; value /= unit {
+		div *= unit
+		exp++
+	}
+
+	return fmt.Sprintf("%.1f %ciB", float64(total)/float64(div), "KMGTPE"[exp])
 }
 
 func reorderArgs(args []string, valueFlags map[string]bool) []string {
