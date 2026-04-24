@@ -36,6 +36,8 @@ func run(args []string) error {
 		return runBench(args[1:])
 	case "check":
 		return runCheck(args[1:])
+	case "index":
+		return runIndex(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -257,6 +259,24 @@ func runCheck(args []string) error {
 	return nil
 }
 
+func runIndex(args []string) error {
+	flags := flag.NewFlagSet("index", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	if err := flags.Parse(reorderArgs(args, map[string]bool{})); err != nil {
+		return err
+	}
+	if flags.NArg() != 1 {
+		return errors.New("usage: tape index <path>")
+	}
+
+	if err := tape.BuildSessionIndex(flags.Arg(0)); err != nil {
+		return err
+	}
+
+	fmt.Printf("Index written: %s\n", flags.Arg(0)+".idx")
+	return nil
+}
+
 func configFromFlags(speed string, step bool, permissive bool, filter tape.Filter, startAt tape.StartAt) (tape.Config, error) {
 	if step {
 		return tape.Config{Mode: tape.StepMode, Permissive: permissive, Filter: filter, StartAt: startAt}, nil
@@ -339,6 +359,7 @@ func printUsage() {
 	fmt.Println("  tape inspect <path> [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]")
 	fmt.Println("  tape bench [--events N] [--symbols N]")
 	fmt.Println("  tape check <path> [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]")
+	fmt.Println("  tape index <path>")
 }
 
 func sampleEvents(path string, limit int, config tape.Config) ([]tape.Event, error) {
@@ -354,6 +375,17 @@ func sampleEvents(path string, limit int, config tape.Config) ([]tape.Event, err
 
 	samples := make([]tape.Event, 0, limit)
 	started := !config.StartAt.Active()
+	if seeker, ok := stream.(interface {
+		SeekStartAt(tape.StartAt) (bool, error)
+	}); ok && config.StartAt.Active() {
+		seeked, err := seeker.SeekStartAt(config.StartAt)
+		if err != nil {
+			return nil, err
+		}
+		if seeked {
+			started = true
+		}
+	}
 	for len(samples) < limit {
 		event, err := stream.Next()
 		if err != nil {

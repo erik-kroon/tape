@@ -84,6 +84,31 @@ func TestRunReplayRecordsEvents(t *testing.T) {
 	}
 }
 
+func TestRunIndexBuildsSidecar(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.tape")
+	records := strings.Join([]string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":93.12,"size":10,"seq":1},"index":0}`,
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:01Z","symbol":"ERICB","price":93.20,"size":8,"seq":2},"index":1}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(records), 0o600); err != nil {
+		t.Fatalf("write recording: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		err := run([]string{"index", path})
+		if err != nil {
+			t.Fatalf("run index: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "Index written: "+path+".idx") {
+		t.Fatalf("output missing index path\n%s", output)
+	}
+	if _, err := os.Stat(path + ".idx"); err != nil {
+		t.Fatalf("stat index: %v", err)
+	}
+}
+
 func TestRunInspectAppliesFiltersToSummaryAndSample(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mixed.tape")
 	records := strings.Join([]string{
