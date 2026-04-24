@@ -2,18 +2,19 @@ package tape
 
 import (
 	"bufio"
-	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"sync"
 )
 
 type Recorder struct {
-	mu     sync.Mutex
-	file   *os.File
-	writer *bufio.Writer
-	codecs eventCodecRegistry
+	mu           sync.Mutex
+	path         string
+	file         *os.File
+	writer       *bufio.Writer
+	codecs       eventCodecRegistry
+	bytesWritten int64
+	indexEntries []sessionIndexEntry
 }
 
 func NewRecorder(path string) (*Recorder, error) {
@@ -33,6 +34,7 @@ func NewRecorderWithCodecs(path string, codecs ...EventCodec) (*Recorder, error)
 	}
 
 	return &Recorder{
+		path:   path,
 		file:   file,
 		writer: bufio.NewWriter(file),
 		codecs: registry,
@@ -62,12 +64,14 @@ func (r *Recorder) Record(index int, event Event) error {
 	if err != nil {
 		return err
 	}
+	r.indexEntries = append(r.indexEntries, newSessionIndexEntry(r.bytesWritten, index, event))
 	if _, err := r.writer.Write(record); err != nil {
 		return err
 	}
 	if err := r.writer.WriteByte('\n'); err != nil {
 		return err
 	}
+	r.bytesWritten += int64(len(record) + 1)
 	return r.writer.Flush()
 }
 
@@ -81,13 +85,17 @@ func (r *Recorder) Close() error {
 			return err
 		}
 	}
-	return r.file.Close()
+	if err := r.file.Close(); err != nil {
+		return err
+	}
+	return writeSessionIndex(r.path, r.indexEntries)
 }
 
 type jsonlStream struct {
 	file    *os.File
 	scanner *bufio.Scanner
 	codecs  eventCodecRegistry
+	index   *sessionIndex
 }
 
 func OpenJSONLStream(path string) (Stream, error) {
@@ -110,6 +118,7 @@ func OpenJSONLStreamWithCodecs(path string, codecs ...EventCodec) (Stream, error
 		file:    file,
 		scanner: bufio.NewScanner(file),
 		codecs:  registry,
+		index:   loadSessionIndex(path),
 	}, nil
 }
 
@@ -121,12 +130,23 @@ func (s *jsonlStream) Next() (Event, error) {
 		return nil, io.EOF
 	}
 
-	var record sessionRecord
-	if err := json.Unmarshal(s.scanner.Bytes(), &record); err != nil {
-		return nil, fmt.Errorf("decode error: invalid session record: %w", err)
+	record, err := decodeSessionRecord(s.scanner.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	return s.codecs.Decode(record)
+}
+
+func (s *jsonlStream) SeekStartAt(startAt StartAt) (bool, error) {
+	if s.index == nil || !startAt.Active() {
+		return false, nil
 	}
 
-	return s.codecs.Decode(record)
+	if _, err := s.file.Seek(s.index.offsetFor(startAt), io.SeekStart); err != nil {
+		return false, err
+	}
+	s.scanner = bufio.NewScanner(s.file)
+	return true, nil
 }
 
 func (s *jsonlStream) Close() error {

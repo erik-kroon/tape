@@ -71,6 +71,12 @@ go run ./examples/record_replay
 tape inspect sessions/opening-bell.tape --sample 5
 ```
 
+Tape recordings automatically write a `.idx` sidecar on close so `--start-at` can jump directly into large sessions. Existing recordings can be indexed or reindexed with:
+
+```bash
+tape index sessions/opening-bell.tape
+```
+
 ## Run a determinism check
 
 ```bash
@@ -132,6 +138,8 @@ Replay summaries report event totals, wall-clock elapsed time, throughput, alloc
 `replay`, `inspect`, and `check` all support the same inclusive filters: `--symbol` for one or more comma-separated symbols, `--event-type` for one or more comma-separated event types, and `--from` / `--to` for RFC3339 time bounds.
 
 Those commands also support `--start-at` to seek before replay begins. `--start-at` accepts an RFC3339 timestamp, a `YYYY-MM-DD` date, or a sequence number, and starts from the first event at or after that position.
+
+When a valid `.tape.idx` sidecar is present, Tape uses it automatically for `.tape` and `.jsonl` sessions. Missing or stale indexes fall back to the normal linear scan.
 
 ## Custom event codecs
 

@@ -132,6 +132,16 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 	handler := e.chainHandlers(timer)
 	clock := newReplayClock(e.config)
 	started := !e.config.StartAt.Active()
+	if seeker, ok := stream.(startAtSeeker); ok && e.config.StartAt.Active() {
+		seeked, err := seeker.SeekStartAt(e.config.StartAt)
+		if err != nil {
+			summary.ErrorCount++
+			return summary, err
+		}
+		if seeked {
+			started = true
+		}
+	}
 	var prev Event
 
 	for {

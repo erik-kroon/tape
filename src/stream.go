@@ -12,6 +12,10 @@ type Stream interface {
 	Close() error
 }
 
+type startAtSeeker interface {
+	SeekStartAt(StartAt) (bool, error)
+}
+
 func OpenStream(path string) (Stream, error) {
 	return OpenStreamWithCodecs(path)
 }

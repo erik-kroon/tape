@@ -78,6 +78,140 @@ func TestRecorderRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRecorderCloseWritesSessionIndex(t *testing.T) {
+	recordingPath := filepath.Join(t.TempDir(), "session.tape")
+
+	recorder, err := tape.NewRecorder(recordingPath)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	if err := recorder.Record(0, tape.Tick{
+		Time:  time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC),
+		Sym:   "ERICB",
+		Price: 93.12,
+		Seq:   1,
+	}); err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("close recorder: %v", err)
+	}
+
+	if _, err := os.Stat(recordingPath + ".idx"); err != nil {
+		t.Fatalf("stat index: %v", err)
+	}
+}
+
+func TestRunFileSupportsStartAtWithoutSessionIndex(t *testing.T) {
+	recordingPath := filepath.Join(t.TempDir(), "session.tape")
+
+	recorder, err := tape.NewRecorder(recordingPath)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	engine.AddSink(recorder)
+	if _, err := engine.RunFile(filepath.Join("..", "testdata", "ticks_5_rows.csv")); err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("close recorder: %v", err)
+	}
+	if err := os.Remove(recordingPath + ".idx"); err != nil {
+		t.Fatalf("remove index: %v", err)
+	}
+
+	replay := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		StartAt: tape.StartAt{
+			Sequence: 4,
+		},
+	})
+	summary, err := replay.RunFile(recordingPath)
+	if err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+	if summary.Events != 2 {
+		t.Fatalf("events = %d, want 2", summary.Events)
+	}
+}
+
+func TestRunFileSupportsStartAtWithValidSessionIndex(t *testing.T) {
+	recordingPath := filepath.Join(t.TempDir(), "session.tape")
+
+	recorder, err := tape.NewRecorder(recordingPath)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	engine.AddSink(recorder)
+	if _, err := engine.RunFile(filepath.Join("..", "testdata", "ticks_5_rows.csv")); err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("close recorder: %v", err)
+	}
+
+	replay := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		StartAt: tape.StartAt{
+			Sequence: 4,
+		},
+	})
+	summary, err := replay.RunFile(recordingPath)
+	if err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+	if summary.Events != 2 {
+		t.Fatalf("events = %d, want 2", summary.Events)
+	}
+}
+
+func TestRunFileFallsBackWhenSessionIndexIsStale(t *testing.T) {
+	recordingPath := filepath.Join(t.TempDir(), "session.tape")
+
+	recorder, err := tape.NewRecorder(recordingPath)
+	if err != nil {
+		t.Fatalf("new recorder: %v", err)
+	}
+
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	engine.AddSink(recorder)
+	if _, err := engine.RunFile(filepath.Join("..", "testdata", "ticks_5_rows.csv")); err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+	if err := recorder.Close(); err != nil {
+		t.Fatalf("close recorder: %v", err)
+	}
+
+	contents, err := os.ReadFile(recordingPath)
+	if err != nil {
+		t.Fatalf("read recording: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(contents)), "\n")
+	reduced := strings.Join(lines[:3], "\n") + "\n"
+	if err := os.WriteFile(recordingPath, []byte(reduced), 0o600); err != nil {
+		t.Fatalf("rewrite recording: %v", err)
+	}
+
+	replay := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		StartAt: tape.StartAt{
+			Sequence: 4,
+		},
+	})
+	summary, err := replay.RunFile(recordingPath)
+	if err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+	if summary.Events != 0 {
+		t.Fatalf("events = %d, want 0", summary.Events)
+	}
+}
+
 func TestCheckDeterminism(t *testing.T) {
 	result, err := tape.CheckDeterminism(filepath.Join("..", "testdata", "bars_5_rows.csv"), tape.Config{
 		Mode: tape.MaxSpeedMode,
