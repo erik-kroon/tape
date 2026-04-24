@@ -42,7 +42,7 @@ tape replay testdata/ticks_5_rows.csv --record sessions/opening-bell.tape
 ## Inspect a recording
 
 ```bash
-tape inspect sessions/opening-bell.tape
+tape inspect sessions/opening-bell.tape --sample 5
 ```
 
 ## Run a determinism check
@@ -66,7 +66,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/erik-kroon/tape"
+	tape "github.com/erik-kroon/tape/src"
 )
 
 func main() {
@@ -76,7 +76,7 @@ func main() {
 	})
 
 	engine.OnBar(func(ctx tape.Context, bar tape.Bar) error {
-		fmt.Println(bar.Symbol(), bar.Close)
+		fmt.Println(ctx.Clock().Now(), bar.Symbol(), bar.Close)
 		return nil
 	})
 
@@ -89,3 +89,5 @@ func main() {
 ## Current scope
 
 This repository is an MVP scaffold aligned to the PRD. It focuses on deterministic local replay primitives and a usable CLI, not a full exchange simulator or backtesting framework.
+
+Replay summaries report event totals, wall-clock elapsed time, throughput, allocation volume, and error counts. The inspect command prints a short event sample to make recorded sessions easier to sanity-check from the terminal.

@@ -5,22 +5,47 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"time"
 )
 
+type Clock interface {
+	Now() time.Time
+}
+
 type Context struct {
-	Index     int
-	StartedAt time.Time
+	Index      int
+	StartedAt  time.Time
+	replayTime time.Time
 }
 
 type EventHandler func(Context, Event) error
 type Middleware func(EventHandler) EventHandler
 
+func (c Context) Clock() Clock {
+	return contextClock{now: c.replayTime}
+}
+
+func (c Context) ReplayTime() time.Time {
+	return c.replayTime
+}
+
+type contextClock struct {
+	now time.Time
+}
+
+func (c contextClock) Now() time.Time {
+	return c.now
+}
+
 type Summary struct {
 	Events         int
+	ErrorCount     int
 	StartedAt      time.Time
 	FinishedAt     time.Time
 	WallDuration   time.Duration
+	Throughput     float64
+	AllocBytes     uint64
 	FirstEventTime time.Time
 	LastEventTime  time.Time
 	EventTypes     map[string]int
@@ -75,31 +100,39 @@ func (e *Engine) RunFile(path string) (Summary, error) {
 	return e.Run(stream)
 }
 
-func (e *Engine) Run(stream Stream) (Summary, error) {
-	summary := Summary{
+func (e *Engine) Run(stream Stream) (summary Summary, err error) {
+	summary = Summary{
 		StartedAt:  time.Now(),
 		EventTypes: map[string]int{},
 		Symbols:    map[string]int{},
 	}
+	var startMem runtime.MemStats
+	runtime.ReadMemStats(&startMem)
+	defer finalizeSummary(&summary, startMem)
 
 	handler := e.chainHandlers()
 	clock := newReplayClock(e.config)
 	var prev Event
 
 	for {
-		event, err := stream.Next()
+		var event Event
+		event, err = stream.Next()
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				err = nil
 				break
 			}
+			summary.ErrorCount++
 			return summary, err
 		}
 
-		if err := validateOrdering(prev, event, e.config.Permissive); err != nil {
+		if err = validateOrdering(prev, event, e.config.Permissive); err != nil {
+			summary.ErrorCount++
 			return summary, err
 		}
 
-		if err := clock.Wait(summary.Events, event.Timestamp()); err != nil {
+		if err = clock.Wait(summary.Events, event.Timestamp()); err != nil {
+			summary.ErrorCount++
 			return summary, err
 		}
 
@@ -113,10 +146,12 @@ func (e *Engine) Run(stream Stream) (Summary, error) {
 		}
 
 		ctx := Context{
-			Index:     summary.Events,
-			StartedAt: summary.StartedAt,
+			Index:      summary.Events,
+			StartedAt:  summary.StartedAt,
+			replayTime: event.Timestamp(),
 		}
-		if err := handler(ctx, event); err != nil {
+		if err = handler(ctx, event); err != nil {
+			summary.ErrorCount++
 			return summary, err
 		}
 
@@ -124,9 +159,22 @@ func (e *Engine) Run(stream Stream) (Summary, error) {
 		prev = event
 	}
 
+	return summary, nil
+}
+
+func finalizeSummary(summary *Summary, startMem runtime.MemStats) {
 	summary.FinishedAt = time.Now()
 	summary.WallDuration = summary.FinishedAt.Sub(summary.StartedAt)
-	return summary, nil
+
+	var endMem runtime.MemStats
+	runtime.ReadMemStats(&endMem)
+	if endMem.TotalAlloc >= startMem.TotalAlloc {
+		summary.AllocBytes = endMem.TotalAlloc - startMem.TotalAlloc
+	}
+
+	if summary.WallDuration > 0 {
+		summary.Throughput = float64(summary.Events) / summary.WallDuration.Seconds()
+	}
 }
 
 func (e *Engine) chainHandlers() EventHandler {
