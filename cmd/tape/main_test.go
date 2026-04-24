@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -94,6 +95,50 @@ func TestRunInspectRejectsInvalidTimeRange(t *testing.T) {
 	}
 }
 
+func TestRunnableExamples(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		path      string
+		fragments []string
+	}{
+		{
+			name: "replay",
+			path: "./examples/replay",
+			fragments: []string{
+				"09:30:00 ERICB close=92.70",
+				"Replayed 5 bar events across 1 symbol(s)",
+			},
+		},
+		{
+			name: "record_replay",
+			path: "./examples/record_replay",
+			fragments: []string{
+				"Recorded 5 tick events into opening-bell.tape",
+				"replay[0] ERICB price=92.50 size=100",
+				"Replayed 5 events from the recording",
+			},
+		},
+		{
+			name: "benchmark",
+			path: "./examples/benchmark",
+			fragments: []string{
+				"Benchmark events: 50000",
+				"Benchmark symbols: 8",
+				"Throughput:",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output := runGoProgram(t, tc.path)
+			for _, fragment := range tc.fragments {
+				if !strings.Contains(output, fragment) {
+					t.Fatalf("output missing %q\n%s", fragment, output)
+				}
+			}
+		})
+	}
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -118,6 +163,18 @@ func captureStdout(t *testing.T, fn func()) string {
 	output, err := io.ReadAll(reader)
 	if err != nil {
 		t.Fatalf("read output: %v", err)
+	}
+	return string(output)
+}
+
+func runGoProgram(t *testing.T, path string) string {
+	t.Helper()
+
+	command := exec.Command("go", "run", path)
+	command.Dir = filepath.Join("..", "..")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go run %s: %v\n%s", path, err, output)
 	}
 	return string(output)
 }

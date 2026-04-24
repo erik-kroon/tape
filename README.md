@@ -27,6 +27,12 @@ go install github.com/erik-kroon/tape/cmd/tape@latest
 tape replay testdata/bars_5_rows.csv --speed 100x --metrics
 ```
 
+Runnable example:
+
+```bash
+go run ./examples/replay
+```
+
 ## Replay a filtered subset
 
 ```bash
@@ -45,6 +51,12 @@ tape replay testdata/ticks_5_rows.csv --step
 tape replay testdata/ticks_5_rows.csv --record sessions/opening-bell.tape
 ```
 
+Runnable example:
+
+```bash
+go run ./examples/record_replay
+```
+
 ## Inspect a recording
 
 ```bash
@@ -61,6 +73,12 @@ tape check testdata/bars_5_rows.csv --runs 5
 
 ```bash
 tape bench --events 1000000 --symbols 100
+```
+
+Runnable example:
+
+```bash
+go run ./examples/benchmark
 ```
 
 ## Use as a library
