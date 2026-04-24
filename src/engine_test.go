@@ -460,6 +460,120 @@ func TestEngineRejectsInvalidFilterTimeRange(t *testing.T) {
 	}
 }
 
+func TestEngineStartsAtTimestampBeforeApplyingFilters(t *testing.T) {
+	startAt := time.Date(2026, 4, 24, 9, 31, 0, 0, time.UTC)
+	engine := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		StartAt: tape.StartAt{
+			Time: startAt,
+		},
+		Filter: tape.Filter{
+			EventTypes: []string{"tick"},
+		},
+	})
+
+	var got []tape.Event
+	var indices []int
+	engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		got = append(got, event)
+		indices = append(indices, ctx.Index)
+		return nil
+	})
+
+	summary, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+		tape.Bar{Time: startAt, Sym: "ERICB", Open: 93.10, High: 93.30, Low: 93.00, Close: 93.20, Seq: 2},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 31, 30, 0, time.UTC), Sym: "ERICB", Price: 93.25, Seq: 3},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 32, 0, 0, time.UTC), Sym: "VOLV", Price: 301.00, Seq: 4},
+	))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if summary.Events != 2 {
+		t.Fatalf("events = %d, want 2", summary.Events)
+	}
+	if len(got) != 2 {
+		t.Fatalf("handler events = %d, want 2", len(got))
+	}
+	if len(indices) != 2 || indices[0] != 0 || indices[1] != 1 {
+		t.Fatalf("indices = %v, want [0 1]", indices)
+	}
+
+	first, ok := got[0].(tape.Tick)
+	if !ok {
+		t.Fatalf("event[0] type = %T, want tape.Tick", got[0])
+	}
+	if first.Seq != 3 {
+		t.Fatalf("event[0] seq = %d, want 3", first.Seq)
+	}
+	if !summary.FirstEventTime.Equal(first.Time) {
+		t.Fatalf("first event time = %s, want %s", summary.FirstEventTime, first.Time)
+	}
+}
+
+func TestEngineStartsAtSequenceBeforeApplyingFilters(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		StartAt: tape.StartAt{
+			Sequence: 3,
+		},
+		Filter: tape.Filter{
+			Symbols: []string{"ericb"},
+		},
+	})
+
+	var got []tape.Event
+	engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		got = append(got, event)
+		return nil
+	})
+
+	summary, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 30, 0, time.UTC), Sym: "VOLV", Price: 301.00, Seq: 2},
+		tape.Bar{Time: time.Date(2026, 4, 24, 9, 31, 0, 0, time.UTC), Sym: "ERICB", Open: 93.10, High: 93.30, Low: 93.00, Close: 93.20, Seq: 3},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 31, 30, 0, time.UTC), Sym: "ERICB", Price: 93.25, Seq: 4},
+	))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if summary.Events != 2 {
+		t.Fatalf("events = %d, want 2", summary.Events)
+	}
+	if len(got) != 2 {
+		t.Fatalf("handler events = %d, want 2", len(got))
+	}
+	first, ok := got[0].(tape.Bar)
+	if !ok {
+		t.Fatalf("event[0] type = %T, want tape.Bar", got[0])
+	}
+	if first.Seq != 3 {
+		t.Fatalf("event[0] seq = %d, want 3", first.Seq)
+	}
+}
+
+func TestEngineRejectsInvalidStartAt(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		StartAt: tape.StartAt{
+			Time:     time.Date(2026, 4, 24, 9, 31, 0, 0, time.UTC),
+			Sequence: 3,
+		},
+	})
+
+	_, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+	))
+	if err == nil {
+		t.Fatal("run error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "start-at") {
+		t.Fatalf("error = %v, want start-at validation error", err)
+	}
+}
+
 type eventStream struct {
 	events []tape.Event
 	index  int

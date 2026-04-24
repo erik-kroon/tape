@@ -131,6 +131,7 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 
 	handler := e.chainHandlers(timer)
 	clock := newReplayClock(e.config)
+	started := !e.config.StartAt.Active()
 	var prev Event
 
 	for {
@@ -150,6 +151,13 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 			return summary, err
 		}
 		prev = event
+
+		if !started {
+			if !e.config.StartAt.Reached(event) {
+				continue
+			}
+			started = true
+		}
 
 		if !e.config.Filter.Matches(event) {
 			continue
