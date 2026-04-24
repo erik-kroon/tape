@@ -91,7 +91,7 @@ func (e *Engine) OnBar(handler func(Context, Bar) error) {
 }
 
 func (e *Engine) RunFile(path string) (Summary, error) {
-	stream, err := OpenStream(path)
+	stream, err := OpenStreamWithCodecs(path, e.config.EventCodecs...)
 	if err != nil {
 		return Summary{}, err
 	}

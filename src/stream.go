@@ -13,13 +13,17 @@ type Stream interface {
 }
 
 func OpenStream(path string) (Stream, error) {
+	return OpenStreamWithCodecs(path)
+}
+
+func OpenStreamWithCodecs(path string, codecs ...EventCodec) (Stream, error) {
 	ext := strings.ToLower(filepath.Ext(path))
 
 	switch ext {
 	case ".csv":
 		return OpenCSVStream(path)
 	case ".tape", ".jsonl":
-		return OpenJSONLStream(path)
+		return OpenJSONLStreamWithCodecs(path, codecs...)
 	default:
 		return nil, fmt.Errorf("unsupported input format %q", ext)
 	}

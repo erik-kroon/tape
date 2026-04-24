@@ -15,11 +15,12 @@ const (
 )
 
 type Config struct {
-	Mode       Mode
-	Speed      float64
-	Permissive bool
-	StepReader io.Reader
-	StepWriter io.Writer
+	Mode        Mode
+	Speed       float64
+	Permissive  bool
+	StepReader  io.Reader
+	StepWriter  io.Writer
+	EventCodecs []EventCodec
 }
 
 func (c Config) normalized() Config {
