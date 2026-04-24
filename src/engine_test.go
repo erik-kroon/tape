@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -298,6 +299,128 @@ func TestSummaryTracksErrorsOnHandlerFailure(t *testing.T) {
 	}
 	if summary.FinishedAt.IsZero() {
 		t.Fatal("finished at is zero, want non-zero")
+	}
+}
+
+func TestSummaryRecoversFromHandlerPanic(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		panic("kaboom")
+	})
+
+	summary, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+	))
+	if !errors.Is(err, tape.ErrHandlerPanic) {
+		t.Fatalf("err = %v, want %v", err, tape.ErrHandlerPanic)
+	}
+	if !strings.Contains(err.Error(), "kaboom") {
+		t.Fatalf("err = %q, want panic value included", err.Error())
+	}
+	if summary.Events != 0 {
+		t.Fatalf("events = %d, want 0", summary.Events)
+	}
+	if summary.ErrorCount != 1 {
+		t.Fatalf("error count = %d, want 1", summary.ErrorCount)
+	}
+}
+
+func TestSummaryTracksHandlerDuration(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		time.Sleep(2 * time.Millisecond)
+		return nil
+	})
+
+	summary, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 1, 0, time.UTC), Sym: "ERICB", Price: 93.20, Seq: 2},
+	))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if summary.HandlerDuration < 4*time.Millisecond {
+		t.Fatalf("handler duration = %s, want at least 4ms", summary.HandlerDuration)
+	}
+	if summary.HandlerDuration > summary.WallDuration {
+		t.Fatalf("handler duration = %s, want <= wall duration %s", summary.HandlerDuration, summary.WallDuration)
+	}
+}
+
+func TestEngineAppliesSymbolTypeAndTimeFilters(t *testing.T) {
+	end := time.Date(2026, 4, 24, 9, 32, 0, 0, time.UTC)
+	engine := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		Filter: tape.Filter{
+			Symbols:    []string{"ericb"},
+			EventTypes: []string{"tick"},
+			StartTime:  time.Date(2026, 4, 24, 9, 31, 0, 0, time.UTC),
+			EndTime:    end,
+		},
+	})
+
+	var got []tape.Event
+	var indices []int
+	engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		got = append(got, event)
+		indices = append(indices, ctx.Index)
+		return nil
+	})
+
+	summary, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+		tape.Bar{Time: time.Date(2026, 4, 24, 9, 31, 0, 0, time.UTC), Sym: "ERICB", Open: 93.10, High: 93.30, Low: 93.00, Close: 93.20, Seq: 2},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 31, 30, 0, time.UTC), Sym: "VOLV", Price: 301.00, Seq: 3},
+		tape.Tick{Time: end, Sym: "ERICB", Price: 93.25, Seq: 4},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 33, 0, 0, time.UTC), Sym: "ERICB", Price: 93.30, Seq: 5},
+	))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	if summary.Events != 1 {
+		t.Fatalf("events = %d, want 1", summary.Events)
+	}
+	if summary.EventTypes["tick"] != 1 {
+		t.Fatalf("tick count = %d, want 1", summary.EventTypes["tick"])
+	}
+	if summary.Symbols["ERICB"] != 1 {
+		t.Fatalf("ERICB count = %d, want 1", summary.Symbols["ERICB"])
+	}
+	if !summary.FirstEventTime.Equal(end) {
+		t.Fatalf("first event = %s, want %s", summary.FirstEventTime, end)
+	}
+	if !summary.LastEventTime.Equal(end) {
+		t.Fatalf("last event = %s, want %s", summary.LastEventTime, end)
+	}
+	if len(got) != 1 {
+		t.Fatalf("handler events = %d, want 1", len(got))
+	}
+	if tick, ok := got[0].(tape.Tick); !ok || tick.Sym != "ERICB" || !tick.Time.Equal(end) {
+		t.Fatalf("handler event = %#v, want ERICB tick at %s", got[0], end)
+	}
+	if len(indices) != 1 || indices[0] != 0 {
+		t.Fatalf("indices = %v, want [0]", indices)
+	}
+}
+
+func TestEngineRejectsInvalidFilterTimeRange(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{
+		Mode: tape.MaxSpeedMode,
+		Filter: tape.Filter{
+			StartTime: time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC),
+			EndTime:   time.Date(2026, 4, 24, 9, 0, 0, 0, time.UTC),
+		},
+	})
+
+	_, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+	))
+	if err == nil {
+		t.Fatal("run error = nil, want non-nil")
+	}
+	if !strings.Contains(err.Error(), "filter start time") {
+		t.Fatalf("error = %v, want filter time-range error", err)
 	}
 }
 

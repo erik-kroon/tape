@@ -1,7 +1,7 @@
 package tape
 
 import (
-	"runtime/debug"
+	"fmt"
 	"time"
 )
 
@@ -10,10 +10,7 @@ func RecoverPanics() Middleware {
 		return func(ctx Context, event Event) (err error) {
 			defer func() {
 				if recovered := recover(); recovered != nil {
-					err = &PanicError{
-						Value: recovered,
-						Stack: debug.Stack(),
-					}
+					err = fmt.Errorf("%w: %v", ErrHandlerPanic, recovered)
 				}
 			}()
 
@@ -42,8 +39,5 @@ func (t *HandlerTimer) Middleware() Middleware {
 }
 
 func (t *HandlerTimer) Total() time.Duration {
-	if t == nil {
-		return 0
-	}
 	return t.total
 }

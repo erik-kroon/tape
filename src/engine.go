@@ -39,17 +39,18 @@ func (c contextClock) Now() time.Time {
 }
 
 type Summary struct {
-	Events         int
-	ErrorCount     int
-	StartedAt      time.Time
-	FinishedAt     time.Time
-	WallDuration   time.Duration
-	Throughput     float64
-	AllocBytes     uint64
-	FirstEventTime time.Time
-	LastEventTime  time.Time
-	EventTypes     map[string]int
-	Symbols        map[string]int
+	Events          int
+	ErrorCount      int
+	StartedAt       time.Time
+	FinishedAt      time.Time
+	WallDuration    time.Duration
+	HandlerDuration time.Duration
+	Throughput      float64
+	AllocBytes      uint64
+	FirstEventTime  time.Time
+	LastEventTime   time.Time
+	EventTypes      map[string]int
+	Symbols         map[string]int
 }
 
 type Engine struct {
@@ -91,6 +92,10 @@ func (e *Engine) OnBar(handler func(Context, Bar) error) {
 }
 
 func (e *Engine) RunFile(path string) (Summary, error) {
+	if err := e.config.validate(); err != nil {
+		return Summary{}, err
+	}
+
 	stream, err := OpenStreamWithCodecs(path, e.config.EventCodecs...)
 	if err != nil {
 		return Summary{}, err
@@ -101,6 +106,10 @@ func (e *Engine) RunFile(path string) (Summary, error) {
 }
 
 func (e *Engine) Run(stream Stream) (summary Summary, err error) {
+	if err := e.config.validate(); err != nil {
+		return Summary{}, err
+	}
+
 	summary = Summary{
 		StartedAt:  time.Now(),
 		EventTypes: map[string]int{},
@@ -110,7 +119,12 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 	runtime.ReadMemStats(&startMem)
 	defer finalizeSummary(&summary, startMem)
 
-	handler := e.chainHandlers()
+	timer := NewHandlerTimer()
+	defer func() {
+		summary.HandlerDuration = timer.Total()
+	}()
+
+	handler := e.chainHandlers(timer)
 	clock := newReplayClock(e.config)
 	var prev Event
 
@@ -129,6 +143,11 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 		if err = validateOrdering(prev, event, e.config.Permissive); err != nil {
 			summary.ErrorCount++
 			return summary, err
+		}
+		prev = event
+
+		if !e.config.Filter.Matches(event) {
+			continue
 		}
 
 		if err = clock.Wait(summary.Events, event.Timestamp()); err != nil {
@@ -156,7 +175,6 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 		}
 
 		summary.Events++
-		prev = event
 	}
 
 	return summary, nil
@@ -177,7 +195,7 @@ func finalizeSummary(summary *Summary, startMem runtime.MemStats) {
 	}
 }
 
-func (e *Engine) chainHandlers() EventHandler {
+func (e *Engine) chainHandlers(timer *HandlerTimer) EventHandler {
 	handler := func(ctx Context, event Event) error {
 		for _, registered := range e.handlers {
 			if err := registered(ctx, event); err != nil {
@@ -187,9 +205,11 @@ func (e *Engine) chainHandlers() EventHandler {
 		return nil
 	}
 
+	handler = timer.Middleware()(handler)
 	for index := len(e.middleware) - 1; index >= 0; index-- {
 		handler = e.middleware[index](handler)
 	}
+	handler = RecoverPanics()(handler)
 
 	return handler
 }

@@ -27,6 +27,12 @@ go install github.com/erik-kroon/tape/cmd/tape@latest
 tape replay testdata/bars_5_rows.csv --speed 100x --metrics
 ```
 
+## Replay a filtered subset
+
+```bash
+tape replay testdata/bars_5_rows.csv --symbol ERICB --event-type bar --from 2026-04-24T09:31:00Z --to 2026-04-24T09:33:00Z
+```
+
 ## Step through a session
 
 ```bash
@@ -91,6 +97,8 @@ func main() {
 This repository is an MVP scaffold aligned to the PRD. It focuses on deterministic local replay primitives and a usable CLI, not a full exchange simulator or backtesting framework.
 
 Replay summaries report event totals, wall-clock elapsed time, throughput, allocation volume, and error counts. The inspect command prints a short event sample to make recorded sessions easier to sanity-check from the terminal.
+
+`replay`, `inspect`, and `check` all support the same inclusive filters: `--symbol` for one or more comma-separated symbols, `--event-type` for one or more comma-separated event types, and `--from` / `--to` for RFC3339 time bounds.
 
 ## Custom event codecs
 
