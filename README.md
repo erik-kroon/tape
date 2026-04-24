@@ -2,7 +2,7 @@
 
 Tape is a deterministic market-event replay engine for Go.
 
-It helps developers replay, inspect, test, and benchmark trading pipelines using historical CSV data, synthetic event streams, or recorded JSONL sessions.
+It helps developers replay, inspect, test, and benchmark trading pipelines using historical CSV data, Parquet datasets, synthetic event streams, or recorded JSONL sessions.
 
 Tape does not execute trades and does not provide financial advice.
 
@@ -11,7 +11,7 @@ Tape does not execute trades and does not provide financial advice.
 - A small Go library with `Tick` and `Bar` event types
 - A replay engine with max-speed, real-time, accelerated, and step modes
 - Output sinks for replayed events
-- CSV readers for tick and OHLCV bar data
+- CSV and Parquet readers for tick and OHLCV bar data
 - JSONL session recording and replay through `.tape` files
 - A CLI with `replay`, `inspect`, `bench`, and `check`
 - Tests and fixture data for the core replay loop
@@ -22,10 +22,18 @@ Tape does not execute trades and does not provide financial advice.
 go install github.com/erik-kroon/tape/cmd/tape@latest
 ```
 
+Parquet support is powered by [`github.com/parquet-go/parquet-go`](https://github.com/parquet-go/parquet-go), so the module now tracks that dependency's current Go floor: `go 1.24.9`.
+
 ## Replay a CSV file
 
 ```bash
 tape replay testdata/bars_5_rows.csv --speed 100x --metrics
+```
+
+## Replay a Parquet file
+
+```bash
+tape replay testdata/bars_5_rows.parquet --speed max --metrics
 ```
 
 Runnable example:
@@ -81,6 +89,7 @@ tape index sessions/opening-bell.tape
 
 ```bash
 tape check testdata/bars_5_rows.csv --runs 5
+tape check testdata/bars_5_rows.parquet --runs 5
 ```
 
 ## Run a synthetic benchmark
@@ -156,6 +165,23 @@ Replay summaries report event totals, wall-clock elapsed time, throughput, alloc
 Those commands also support `--start-at` to seek before replay begins. `--start-at` accepts an RFC3339 timestamp, a `YYYY-MM-DD` date, or a sequence number, and starts from the first event at or after that position.
 
 When a valid `.tape.idx` sidecar is present, Tape uses it automatically for `.tape` and `.jsonl` sessions. Missing or stale indexes fall back to the normal linear scan.
+
+## Supported Parquet Schemas
+
+Tape currently supports flat Parquet files for two event families:
+
+- Tick rows: a timestamp column named `timestamp`, `time`, or `ts`; a symbol column named `symbol`, `ticker`, or `instrument`; a price column named `price` or `last`; optional size columns named `size`, `qty`, `quantity`, or `volume`; and an optional sequence column named `seq` or `sequence`.
+- Bar rows: a timestamp column named `timestamp`, `time`, or `ts`; a symbol column named `symbol`, `ticker`, or `instrument`; required `open`, `high`, `low`, and `close` columns; an optional `volume` column; and an optional sequence column named `seq` or `sequence`.
+
+The timestamp columns must be stored as Parquet `TIMESTAMP` logical types. The current adapter is intentionally narrow: it expects a single flat file with top-level columns and does not try to interpret nested schemas or partitioned dataset layouts.
+
+## Parquet Performance Notes
+
+Parquet input is read sequentially and converted back into Tape events row by row. This is a good fit for replaying larger historical files without first converting them to CSV, but it is not yet a query engine:
+
+- Tape does not currently use Parquet predicate pushdown or column projection to skip work.
+- Replay still validates event ordering and applies filters after row decode, just like CSV and `.tape` inputs.
+- You should expect better storage efficiency than CSV and similar replay semantics, but not warehouse-style scan optimizations.
 
 ## Custom event codecs
 

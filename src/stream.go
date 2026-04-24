@@ -26,6 +26,8 @@ func OpenStreamWithCodecs(path string, codecs ...EventCodec) (Stream, error) {
 	switch ext {
 	case ".csv":
 		return OpenCSVStream(path)
+	case ".parquet":
+		return OpenParquetStream(path)
 	case ".tape", ".jsonl":
 		return OpenJSONLStreamWithCodecs(path, codecs...)
 	default:
