@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -51,7 +52,7 @@ func TestRecorderRoundTrip(t *testing.T) {
 	}
 
 	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
-	engine.Use(recorder.Middleware())
+	engine.AddSink(recorder)
 	summary, err := engine.RunFile(filepath.Join("..", "testdata", "ticks_5_rows.csv"))
 	closeErr := recorder.Close()
 	if err != nil {
@@ -106,7 +107,7 @@ func TestRecorderRoundTripWithCustomCodec(t *testing.T) {
 	}
 
 	source := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
-	source.Use(recorder.Middleware())
+	source.AddSink(recorder)
 	summary, err := source.Run(newEventStream(
 		headlineEvent{
 			Time:     time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC),
@@ -269,6 +270,41 @@ func TestContextClockExposesReplayTime(t *testing.T) {
 		if !got[index].Equal(timestamps[index]) {
 			t.Fatalf("timestamp[%d] = %s, want %s", index, got[index], timestamps[index])
 		}
+	}
+}
+
+func TestOutputSinksReceiveReplayedEventsBeforeHandlers(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+
+	var calls []string
+	engine.AddSink(tape.OutputSinkFunc(func(ctx tape.Context, event tape.Event) error {
+		calls = append(calls, fmt.Sprintf("sink:%d:%s", ctx.Index, event.Symbol()))
+		return nil
+	}))
+	engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		calls = append(calls, fmt.Sprintf("handler:%d:%s", ctx.Index, event.Symbol()))
+		return nil
+	})
+
+	summary, err := engine.Run(newEventStream(
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC), Sym: "ERICB", Price: 93.12, Seq: 1},
+		tape.Tick{Time: time.Date(2026, 4, 24, 9, 30, 1, 0, time.UTC), Sym: "VOLV", Price: 301.00, Seq: 2},
+	))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if summary.Events != 2 {
+		t.Fatalf("events = %d, want 2", summary.Events)
+	}
+
+	want := []string{
+		"sink:0:ERICB",
+		"handler:0:ERICB",
+		"sink:1:VOLV",
+		"handler:1:VOLV",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("calls = %v, want %v", calls, want)
 	}
 }
 

@@ -10,6 +10,7 @@ Tape does not execute trades and does not provide financial advice.
 
 - A small Go library with `Tick` and `Bar` event types
 - A replay engine with max-speed, real-time, accelerated, and step modes
+- Output sinks for replayed events
 - CSV readers for tick and OHLCV bar data
 - JSONL session recording and replay through `.tape` files
 - A CLI with `replay`, `inspect`, `bench`, and `check`
@@ -80,6 +81,11 @@ func main() {
 		Mode:  tape.AcceleratedMode,
 		Speed: 100,
 	})
+
+	engine.AddSink(tape.OutputSinkFunc(func(ctx tape.Context, event tape.Event) error {
+		fmt.Println("sink", ctx.Index, event.Symbol())
+		return nil
+	}))
 
 	engine.OnBar(func(ctx tape.Context, bar tape.Bar) error {
 		fmt.Println(ctx.Clock().Now(), bar.Symbol(), bar.Close)
