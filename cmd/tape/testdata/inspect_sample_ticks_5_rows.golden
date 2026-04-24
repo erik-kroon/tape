@@ -1,0 +1,8 @@
+Events:      5
+First event: 2026-04-24T09:30:00Z
+Last event:  2026-04-24T09:30:01Z
+Types:       tick=5
+Symbols:     ERICB=5
+Sample:
+  seq=1 time=2026-04-24T09:30:00Z symbol=ERICB price=92.5000 size=100.0000
+  seq=2 time=2026-04-24T09:30:00.25Z symbol=ERICB price=92.5500 size=75.0000
