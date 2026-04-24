@@ -10,6 +10,7 @@ Tape does not execute trades and does not provide financial advice.
 
 - A small Go library with `Tick` and `Bar` event types
 - A replay engine with max-speed, real-time, accelerated, and step modes
+- Output sinks for replayed events
 - CSV readers for tick and OHLCV bar data
 - JSONL session recording and replay through `.tape` files
 - A CLI with `replay`, `inspect`, `bench`, and `check`
@@ -25,6 +26,12 @@ go install github.com/erik-kroon/tape/cmd/tape@latest
 
 ```bash
 tape replay testdata/bars_5_rows.csv --speed 100x --metrics
+```
+
+Runnable example:
+
+```bash
+go run ./examples/replay
 ```
 
 ## Replay a filtered subset
@@ -52,6 +59,12 @@ tape replay testdata/ticks_5_rows.csv --step
 tape replay testdata/ticks_5_rows.csv --record sessions/opening-bell.tape
 ```
 
+Runnable example:
+
+```bash
+go run ./examples/record_replay
+```
+
 ## Inspect a recording
 
 ```bash
@@ -68,6 +81,12 @@ tape check testdata/bars_5_rows.csv --runs 5
 
 ```bash
 tape bench --events 1000000 --symbols 100
+```
+
+Runnable example:
+
+```bash
+go run ./examples/benchmark
 ```
 
 ## Use as a library
@@ -87,6 +106,11 @@ func main() {
 		Mode:  tape.AcceleratedMode,
 		Speed: 100,
 	})
+
+	engine.AddSink(tape.OutputSinkFunc(func(ctx tape.Context, event tape.Event) error {
+		fmt.Println("sink", ctx.Index, event.Symbol())
+		return nil
+	}))
 
 	engine.OnBar(func(ctx tape.Context, bar tape.Bar) error {
 		fmt.Println(ctx.Clock().Now(), bar.Symbol(), bar.Close)

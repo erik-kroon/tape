@@ -89,10 +89,10 @@ func runReplay(args []string) error {
 
 	engine := tape.NewEngine(config)
 	if *printEvents || *step {
-		engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		engine.AddSink(tape.OutputSinkFunc(func(ctx tape.Context, event tape.Event) error {
 			fmt.Println(formatEvent(ctx.Index, event))
 			return nil
-		})
+		}))
 	}
 
 	var recorder *tape.Recorder
@@ -102,7 +102,7 @@ func runReplay(args []string) error {
 			return err
 		}
 		defer recorder.Close()
-		engine.Use(recorder.Middleware())
+		engine.AddSink(recorder)
 	}
 
 	summary, err := engine.RunFile(flags.Arg(0))

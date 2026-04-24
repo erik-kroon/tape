@@ -57,6 +57,7 @@ type Engine struct {
 	config     Config
 	handlers   []EventHandler
 	middleware []Middleware
+	sinks      []OutputSink
 }
 
 func NewEngine(config Config) *Engine {
@@ -65,6 +66,10 @@ func NewEngine(config Config) *Engine {
 
 func (e *Engine) Use(middleware Middleware) {
 	e.middleware = append(e.middleware, middleware)
+}
+
+func (e *Engine) AddSink(sink OutputSink) {
+	e.sinks = append(e.sinks, sink)
 }
 
 func (e *Engine) OnEvent(handler EventHandler) {
@@ -205,6 +210,11 @@ func finalizeSummary(summary *Summary, startMem runtime.MemStats) {
 
 func (e *Engine) chainHandlers(timer *HandlerTimer) EventHandler {
 	handler := func(ctx Context, event Event) error {
+		for _, sink := range e.sinks {
+			if err := sink.Write(ctx, event); err != nil {
+				return err
+			}
+		}
 		for _, registered := range e.handlers {
 			if err := registered(ctx, event); err != nil {
 				return err
