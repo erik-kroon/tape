@@ -42,6 +42,29 @@ func TestRunReplayPrintsEvents(t *testing.T) {
 	golden.Assert(t, filepath.Join("testdata", "replay_print_ticks_5_rows.golden"), output)
 }
 
+func TestRunReplayPrintsParquetEvents(t *testing.T) {
+	output := captureStdout(t, func() {
+		err := run([]string{
+			"replay",
+			"--print",
+			"--metrics=false",
+			filepath.Join("..", "..", "testdata", "ticks_5_rows.parquet"),
+		})
+		if err != nil {
+			t.Fatalf("run replay: %v", err)
+		}
+	})
+
+	for _, fragment := range []string{
+		"seq=1 time=2026-04-24T09:30:00Z symbol=ERICB price=92.5000 size=100.0000",
+		"seq=5 time=2026-04-24T09:30:01Z symbol=ERICB price=92.5800 size=90.0000",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output missing %q\n%s", fragment, output)
+		}
+	}
+}
+
 func TestRunReplayRecordsEvents(t *testing.T) {
 	recordPath := filepath.Join(t.TempDir(), "session.tape")
 
@@ -89,6 +112,30 @@ func TestRunIndexBuildsSidecar(t *testing.T) {
 	}
 	if _, err := os.Stat(path + ".idx"); err != nil {
 		t.Fatalf("stat index: %v", err)
+	}
+}
+
+func TestRunCheckAcceptsParquet(t *testing.T) {
+	output := captureStdout(t, func() {
+		err := run([]string{
+			"check",
+			"--runs", "3",
+			filepath.Join("..", "..", "testdata", "bars_5_rows.parquet"),
+		})
+		if err != nil {
+			t.Fatalf("run check: %v", err)
+		}
+	})
+
+	for _, fragment := range []string{
+		"Determinism check passed.",
+		"Runs:             3",
+		"Events processed: 5",
+		"Output hash:",
+	} {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output missing %q\n%s", fragment, output)
+		}
 	}
 }
 

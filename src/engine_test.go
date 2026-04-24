@@ -43,6 +43,44 @@ func TestReplayCSVBarSummary(t *testing.T) {
 	}
 }
 
+func TestReplayParquetTickSummary(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+
+	summary, err := engine.RunFile(filepath.Join("..", "testdata", "ticks_5_rows.parquet"))
+	if err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+
+	if summary.Events != 5 {
+		t.Fatalf("events = %d, want 5", summary.Events)
+	}
+	if summary.EventTypes["tick"] != 5 {
+		t.Fatalf("tick count = %d, want 5", summary.EventTypes["tick"])
+	}
+	if summary.Symbols["ERICB"] != 5 {
+		t.Fatalf("symbol count = %d, want 5", summary.Symbols["ERICB"])
+	}
+}
+
+func TestReplayParquetBarSummary(t *testing.T) {
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+
+	summary, err := engine.RunFile(filepath.Join("..", "testdata", "bars_5_rows.parquet"))
+	if err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+
+	if summary.Events != 5 {
+		t.Fatalf("events = %d, want 5", summary.Events)
+	}
+	if summary.EventTypes["bar"] != 5 {
+		t.Fatalf("bar count = %d, want 5", summary.EventTypes["bar"])
+	}
+	if summary.Symbols["ERICB"] != 5 {
+		t.Fatalf("symbol count = %d, want 5", summary.Symbols["ERICB"])
+	}
+}
+
 func TestRecorderRoundTrip(t *testing.T) {
 	recordingPath := filepath.Join(t.TempDir(), "session.tape")
 
@@ -214,6 +252,25 @@ func TestRunFileFallsBackWhenSessionIndexIsStale(t *testing.T) {
 
 func TestCheckDeterminism(t *testing.T) {
 	result, err := tape.CheckDeterminism(filepath.Join("..", "testdata", "bars_5_rows.csv"), tape.Config{
+		Mode: tape.MaxSpeedMode,
+	}, 3)
+	if err != nil {
+		t.Fatalf("check determinism: %v", err)
+	}
+
+	if result.Runs != 3 {
+		t.Fatalf("runs = %d, want 3", result.Runs)
+	}
+	if result.Events != 5 {
+		t.Fatalf("events = %d, want 5", result.Events)
+	}
+	if len(result.Hash) != 64 {
+		t.Fatalf("hash length = %d, want 64", len(result.Hash))
+	}
+}
+
+func TestCheckDeterminismParquet(t *testing.T) {
+	result, err := tape.CheckDeterminism(filepath.Join("..", "testdata", "bars_5_rows.parquet"), tape.Config{
 		Mode: tape.MaxSpeedMode,
 	}, 3)
 	if err != nil {
