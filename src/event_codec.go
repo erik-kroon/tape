@@ -11,68 +11,6 @@ type EventCodec struct {
 	Decode func(json.RawMessage) (Event, error)
 }
 
-type eventCodecRegistry struct {
-	byType map[string]EventCodec
-}
-
-func newEventCodecRegistry(custom []EventCodec) (eventCodecRegistry, error) {
-	registry := eventCodecRegistry{
-		byType: map[string]EventCodec{},
-	}
-
-	for _, codec := range builtinEventCodecs() {
-		registry.byType[codec.Type] = codec
-	}
-
-	for _, codec := range custom {
-		if err := validateEventCodec(codec); err != nil {
-			return eventCodecRegistry{}, err
-		}
-		if _, exists := registry.byType[codec.Type]; exists {
-			return eventCodecRegistry{}, fmt.Errorf("codec error: duplicate event codec %q", codec.Type)
-		}
-		registry.byType[codec.Type] = codec
-	}
-
-	return registry, nil
-}
-
-func (r eventCodecRegistry) Marshal(index int, event Event) ([]byte, error) {
-	codec, ok := r.byType[event.Type()]
-	if !ok {
-		return nil, fmt.Errorf("sink error: unsupported event type %T", event)
-	}
-
-	payload, err := codec.Encode(event)
-	if err != nil {
-		return nil, err
-	}
-
-	return json.Marshal(sessionRecord{
-		Type:    codec.Type,
-		Payload: payload,
-		Index:   index,
-	})
-}
-
-func (r eventCodecRegistry) Decode(record sessionRecord) (Event, error) {
-	codec, ok := r.byType[record.Type]
-	if !ok {
-		return nil, fmt.Errorf("decode error: unknown event type %q", record.Type)
-	}
-
-	payload, err := record.payload()
-	if err != nil {
-		return nil, err
-	}
-
-	event, err := codec.Decode(payload)
-	if err != nil {
-		return nil, fmt.Errorf("decode error: invalid %s payload: %w", record.Type, err)
-	}
-	return event, nil
-}
-
 func builtinEventCodecs() []EventCodec {
 	return []EventCodec{
 		{

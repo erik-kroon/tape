@@ -101,16 +101,29 @@ func (e *Engine) RunFile(path string) (Summary, error) {
 		return Summary{}, err
 	}
 
-	stream, err := OpenStreamWithCodecs(path, e.config.EventCodecs...)
+	selection, err := OpenReplaySelection(path, e.config)
 	if err != nil {
 		return Summary{}, err
 	}
-	defer stream.Close()
+	defer selection.Close()
 
-	return e.Run(stream)
+	return e.runSelection(selection)
 }
 
 func (e *Engine) Run(stream Stream) (summary Summary, err error) {
+	if err := e.config.validate(); err != nil {
+		return Summary{}, err
+	}
+
+	selection, err := NewReplaySelection(stream, e.config)
+	if err != nil {
+		return Summary{}, err
+	}
+
+	return e.runSelection(selection)
+}
+
+func (e *Engine) runSelection(selection *ReplaySelection) (summary Summary, err error) {
 	if err := e.config.validate(); err != nil {
 		return Summary{}, err
 	}
@@ -131,22 +144,10 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 
 	handler := e.chainHandlers(timer)
 	clock := newReplayClock(e.config)
-	started := !e.config.StartAt.Active()
-	if seeker, ok := stream.(startAtSeeker); ok && e.config.StartAt.Active() {
-		seeked, err := seeker.SeekStartAt(e.config.StartAt)
-		if err != nil {
-			summary.ErrorCount++
-			return summary, err
-		}
-		if seeked {
-			started = true
-		}
-	}
-	var prev Event
 
 	for {
-		var event Event
-		event, err = stream.Next()
+		selected, nextErr := selection.Next()
+		err = nextErr
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				err = nil
@@ -156,29 +157,14 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 			return summary, err
 		}
 
-		if err = validateOrdering(prev, event, e.config.Permissive); err != nil {
-			summary.ErrorCount++
-			return summary, err
-		}
-		prev = event
+		event := selected.Event
 
-		if !started {
-			if !e.config.StartAt.Reached(event) {
-				continue
-			}
-			started = true
-		}
-
-		if !e.config.Filter.Matches(event) {
-			continue
-		}
-
-		if err = clock.Wait(summary.Events, event.Timestamp()); err != nil {
+		if err = clock.Wait(selected.Index, event.Timestamp()); err != nil {
 			summary.ErrorCount++
 			return summary, err
 		}
 
-		if summary.Events == 0 {
+		if selected.Index == 0 {
 			summary.FirstEventTime = event.Timestamp()
 		}
 		summary.LastEventTime = event.Timestamp()
@@ -188,7 +174,7 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 		}
 
 		ctx := Context{
-			Index:      summary.Events,
+			Index:      selected.Index,
 			StartedAt:  summary.StartedAt,
 			replayTime: event.Timestamp(),
 		}
@@ -197,7 +183,7 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 			return summary, err
 		}
 
-		summary.Events++
+		summary.Events = selected.Index + 1
 	}
 
 	return summary, nil

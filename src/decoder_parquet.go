@@ -67,7 +67,7 @@ func OpenParquetStream(path string) (Stream, error) {
 	stream := &parquetStream{
 		file:   file,
 		reader: parquet.NewGenericReader[parquetEventRow](file),
-		kind:   inferCSVKind(headers),
+		kind:   tapeEventSchema.InferKind(parquetFieldLookup(headers)),
 	}
 	if stream.kind == "" {
 		file.Close()
@@ -87,68 +87,7 @@ func (s *parquetStream) Next() (Event, error) {
 		return nil, io.EOF
 	}
 
-	row := rows[0]
-	timestamp, err := row.timeValue(true, "timestamp", "time", "ts")
-	if err != nil {
-		return nil, err
-	}
-	symbol := row.stringValue("symbol", "ticker", "instrument")
-	sequence, err := row.intValue(false, "seq", "sequence")
-	if err != nil {
-		return nil, err
-	}
-
-	switch s.kind {
-	case "tick":
-		price, err := row.floatValue(true, "price", "last")
-		if err != nil {
-			return nil, err
-		}
-		size, err := row.floatValue(false, "size", "qty", "quantity", "volume")
-		if err != nil {
-			return nil, err
-		}
-		return Tick{
-			Time:  timestamp,
-			Sym:   symbol,
-			Price: price,
-			Size:  size,
-			Seq:   sequence,
-		}, nil
-	case "bar":
-		open, err := row.floatValue(true, "open")
-		if err != nil {
-			return nil, err
-		}
-		high, err := row.floatValue(true, "high")
-		if err != nil {
-			return nil, err
-		}
-		low, err := row.floatValue(true, "low")
-		if err != nil {
-			return nil, err
-		}
-		closeValue, err := row.floatValue(true, "close")
-		if err != nil {
-			return nil, err
-		}
-		volume, err := row.floatValue(false, "volume")
-		if err != nil {
-			return nil, err
-		}
-		return Bar{
-			Time:   timestamp,
-			Sym:    symbol,
-			Open:   open,
-			High:   high,
-			Low:    low,
-			Close:  closeValue,
-			Volume: volume,
-			Seq:    sequence,
-		}, nil
-	default:
-		return nil, fmt.Errorf("decode error: unsupported Parquet type %q", s.kind)
-	}
+	return tapeEventSchema.Decode(s.kind, parquetRowValues{row: rows[0]})
 }
 
 func (s *parquetStream) Close() error {
@@ -159,20 +98,74 @@ func (s *parquetStream) Close() error {
 	return s.file.Close()
 }
 
-func (r parquetEventRow) timeValue(required bool, aliases ...string) (time.Time, error) {
+type parquetFieldLookup map[string]int
+
+func (l parquetFieldLookup) Has(alias string) bool {
+	_, ok := l[alias]
+	return ok
+}
+
+type parquetRowValues struct {
+	row parquetEventRow
+}
+
+func (v parquetRowValues) Has(alias string) bool {
+	switch alias {
+	case "timestamp":
+		return v.row.Timestamp != nil
+	case "time":
+		return v.row.Time != nil
+	case "ts":
+		return v.row.TS != nil
+	case "symbol":
+		return v.row.Symbol != nil
+	case "ticker":
+		return v.row.Ticker != nil
+	case "instrument":
+		return v.row.Instrument != nil
+	case "price":
+		return v.row.Price != nil
+	case "last":
+		return v.row.Last != nil
+	case "size":
+		return v.row.Size != nil
+	case "qty":
+		return v.row.Qty != nil
+	case "quantity":
+		return v.row.Quantity != nil
+	case "volume":
+		return v.row.Volume != nil
+	case "seq":
+		return v.row.Seq != nil
+	case "sequence":
+		return v.row.Sequence != nil
+	case "open":
+		return v.row.Open != nil
+	case "high":
+		return v.row.High != nil
+	case "low":
+		return v.row.Low != nil
+	case "close":
+		return v.row.Close != nil
+	default:
+		return false
+	}
+}
+
+func (v parquetRowValues) Time(required bool, aliases ...string) (time.Time, error) {
 	for _, alias := range aliases {
 		switch alias {
 		case "timestamp":
-			if r.Timestamp != nil {
-				return *r.Timestamp, nil
+			if v.row.Timestamp != nil {
+				return *v.row.Timestamp, nil
 			}
 		case "time":
-			if r.Time != nil {
-				return *r.Time, nil
+			if v.row.Time != nil {
+				return *v.row.Time, nil
 			}
 		case "ts":
-			if r.TS != nil {
-				return *r.TS, nil
+			if v.row.TS != nil {
+				return *v.row.TS, nil
 			}
 		}
 	}
@@ -183,68 +176,68 @@ func (r parquetEventRow) timeValue(required bool, aliases ...string) (time.Time,
 	return time.Time{}, nil
 }
 
-func (r parquetEventRow) stringValue(aliases ...string) string {
+func (v parquetRowValues) String(aliases ...string) string {
 	for _, alias := range aliases {
 		switch alias {
 		case "symbol":
-			if r.Symbol != nil {
-				return strings.TrimSpace(*r.Symbol)
+			if v.row.Symbol != nil {
+				return strings.TrimSpace(*v.row.Symbol)
 			}
 		case "ticker":
-			if r.Ticker != nil {
-				return strings.TrimSpace(*r.Ticker)
+			if v.row.Ticker != nil {
+				return strings.TrimSpace(*v.row.Ticker)
 			}
 		case "instrument":
-			if r.Instrument != nil {
-				return strings.TrimSpace(*r.Instrument)
+			if v.row.Instrument != nil {
+				return strings.TrimSpace(*v.row.Instrument)
 			}
 		}
 	}
 	return ""
 }
 
-func (r parquetEventRow) floatValue(required bool, aliases ...string) (float64, error) {
+func (v parquetRowValues) Float(required bool, aliases ...string) (float64, error) {
 	for _, alias := range aliases {
 		switch alias {
 		case "price":
-			if r.Price != nil {
-				return *r.Price, nil
+			if v.row.Price != nil {
+				return *v.row.Price, nil
 			}
 		case "last":
-			if r.Last != nil {
-				return *r.Last, nil
+			if v.row.Last != nil {
+				return *v.row.Last, nil
 			}
 		case "size":
-			if r.Size != nil {
-				return *r.Size, nil
+			if v.row.Size != nil {
+				return *v.row.Size, nil
 			}
 		case "qty":
-			if r.Qty != nil {
-				return *r.Qty, nil
+			if v.row.Qty != nil {
+				return *v.row.Qty, nil
 			}
 		case "quantity":
-			if r.Quantity != nil {
-				return *r.Quantity, nil
+			if v.row.Quantity != nil {
+				return *v.row.Quantity, nil
 			}
 		case "volume":
-			if r.Volume != nil {
-				return *r.Volume, nil
+			if v.row.Volume != nil {
+				return *v.row.Volume, nil
 			}
 		case "open":
-			if r.Open != nil {
-				return *r.Open, nil
+			if v.row.Open != nil {
+				return *v.row.Open, nil
 			}
 		case "high":
-			if r.High != nil {
-				return *r.High, nil
+			if v.row.High != nil {
+				return *v.row.High, nil
 			}
 		case "low":
-			if r.Low != nil {
-				return *r.Low, nil
+			if v.row.Low != nil {
+				return *v.row.Low, nil
 			}
 		case "close":
-			if r.Close != nil {
-				return *r.Close, nil
+			if v.row.Close != nil {
+				return *v.row.Close, nil
 			}
 		}
 	}
@@ -255,16 +248,16 @@ func (r parquetEventRow) floatValue(required bool, aliases ...string) (float64, 
 	return 0, nil
 }
 
-func (r parquetEventRow) intValue(required bool, aliases ...string) (int64, error) {
+func (v parquetRowValues) Int(required bool, aliases ...string) (int64, error) {
 	for _, alias := range aliases {
 		switch alias {
 		case "seq":
-			if r.Seq != nil {
-				return *r.Seq, nil
+			if v.row.Seq != nil {
+				return *v.row.Seq, nil
 			}
 		case "sequence":
-			if r.Sequence != nil {
-				return *r.Sequence, nil
+			if v.row.Sequence != nil {
+				return *v.row.Sequence, nil
 			}
 		}
 	}
