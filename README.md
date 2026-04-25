@@ -199,6 +199,52 @@ func main() {
 
 Replay summaries include event totals, elapsed wall time, throughput, allocation volume, and error counts.
 
+## Strategy Harness
+
+For project-level strategy code, use the `strategy` package to bind user hooks to Tape without wiring `Engine` callbacks manually each time.
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+
+	"github.com/erik-kroon/tape/strategy"
+	tape "github.com/erik-kroon/tape/src"
+)
+
+func main() {
+	summary, err := strategy.RunFile("testdata/bars_5_rows.csv", tape.Config{
+		Mode: tape.MaxSpeedMode,
+	}, strategy.Hooks{
+		OnStart: func(ctx strategy.RunContext) error {
+			fmt.Println("starting", ctx.Path)
+			return nil
+		},
+		OnEvent: func(ctx tape.Context, event tape.Event) error {
+			bar, ok := event.(tape.Bar)
+			if !ok {
+				return nil
+			}
+			fmt.Println(ctx.Index, bar.Symbol(), bar.Close)
+			return nil
+		},
+		OnEnd: func(result strategy.RunResult) error {
+			fmt.Println("finished", result.Summary.Events, "events")
+			return nil
+		},
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("events:", summary.Events)
+}
+```
+
+Use `strategy.NewRunner` when you want to attach Tape middleware or sinks once and reuse the same harness across runs.
+
 ## Supported Parquet Schemas
 
 Tape currently supports flat Parquet files for two event families:
