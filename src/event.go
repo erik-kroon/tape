@@ -43,11 +43,12 @@ func (b Bar) Timestamp() time.Time { return b.Time }
 func (b Bar) Sequence() int64      { return b.Seq }
 
 type sessionRecord struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload,omitempty"`
-	Tick    *Tick           `json:"tick,omitempty"`
-	Bar     *Bar            `json:"bar,omitempty"`
-	Index   int             `json:"index,omitempty"`
+	Type    string           `json:"type"`
+	Payload json.RawMessage  `json:"payload,omitempty"`
+	Tick    *Tick            `json:"tick,omitempty"`
+	Bar     *Bar             `json:"bar,omitempty"`
+	Index   int              `json:"index,omitempty"`
+	Meta    *sessionMetadata `json:"meta,omitempty"`
 }
 
 func (r sessionRecord) payload() (json.RawMessage, error) {

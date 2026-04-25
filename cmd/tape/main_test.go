@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -82,11 +83,51 @@ func TestRunReplayRecordsEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read recording: %v", err)
 	}
-	if count := strings.Count(string(contents), "\n"); count != 5 {
-		t.Fatalf("record lines = %d, want 5", count)
+	lines := strings.Split(strings.TrimSpace(string(contents)), "\n")
+	if len(lines) != 6 {
+		t.Fatalf("record lines = %d, want 6", len(lines))
 	}
 	if !strings.Contains(string(contents), `"type":"tick"`) {
 		t.Fatalf("recording missing tick payloads\n%s", string(contents))
+	}
+
+	var header struct {
+		Meta struct {
+			SchemaVersion       int      `json:"schema_version"`
+			SymbolUniverse      []string `json:"symbol_universe"`
+			EventFamilies       []string `json:"event_families"`
+			TimezoneAssumptions []string `json:"timezone_assumptions"`
+			SourceInfo          struct {
+				Sources []struct {
+					Path   string `json:"path"`
+					Format string `json:"format"`
+				} `json:"sources"`
+			} `json:"source_info"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &header); err != nil {
+		t.Fatalf("unmarshal metadata header: %v", err)
+	}
+	if header.Meta.SchemaVersion != 1 {
+		t.Fatalf("schema version = %d, want 1", header.Meta.SchemaVersion)
+	}
+	if got := strings.Join(header.Meta.SymbolUniverse, ","); got != "ERICB" {
+		t.Fatalf("symbol universe = %q, want ERICB", got)
+	}
+	if got := strings.Join(header.Meta.EventFamilies, ","); got != "tick" {
+		t.Fatalf("event families = %q, want tick", got)
+	}
+	if len(header.Meta.SourceInfo.Sources) != 1 {
+		t.Fatalf("source count = %d, want 1", len(header.Meta.SourceInfo.Sources))
+	}
+	if header.Meta.SourceInfo.Sources[0].Format != "csv" {
+		t.Fatalf("source format = %q, want csv", header.Meta.SourceInfo.Sources[0].Format)
+	}
+	if header.Meta.SourceInfo.Sources[0].Path != filepath.Join("..", "..", "testdata", "ticks_5_rows.csv") {
+		t.Fatalf("source path = %q, want testdata csv path", header.Meta.SourceInfo.Sources[0].Path)
+	}
+	if got := strings.Join(header.Meta.TimezoneAssumptions, ","); got != "CSV timestamps without an explicit offset are interpreted as UTC,recorded timestamps preserve the offset carried by each event" {
+		t.Fatalf("timezone assumptions = %q, want CSV+recorded offset notes", got)
 	}
 }
 
