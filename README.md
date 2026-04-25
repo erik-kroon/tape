@@ -47,6 +47,12 @@ tape replay testdata/bars_5_rows.csv \
   --to 2026-04-24T09:33:00Z
 ```
 
+Replay a merged stream from multiple files:
+
+```bash
+tape replay sessions/quotes.tape sessions/trades.tape --speed max --metrics
+```
+
 Step through events manually:
 
 ```bash
@@ -67,7 +73,7 @@ tape inspect testdata/ticks_5_rows.csv --start-at 4 --sample 2
 Replays events from a file through the engine.
 
 ```bash
-tape replay <path> [--speed max|realtime|100x] [--step] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
+tape replay <path> [<path>...] [--speed max|realtime|100x] [--step] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
 ```
 
 Use `--record` to capture the replay into a `.tape` session:
@@ -88,7 +94,7 @@ go run ./examples/record_replay
 Prints a small sample of events from a source without replaying the full stream.
 
 ```bash
-tape inspect <path> [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
+tape inspect <path> [<path>...] [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
 ```
 
 Example:
@@ -102,7 +108,7 @@ tape inspect sessions/opening-bell.tape --sample 5
 Runs the same input multiple times and verifies deterministic output.
 
 ```bash
-tape check <path> [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
+tape check <path> [<path>...] [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]
 ```
 
 Examples:
@@ -143,7 +149,7 @@ tape index sessions/opening-bell.tape
 
 ## Filters and Start Positions
 
-`replay`, `inspect`, and `check` all support the same inclusive filters:
+`replay`, `inspect`, and `check` all support one or more input paths plus the same inclusive filters:
 
 - `--symbol` for one or more comma-separated symbols
 - `--event-type` for one or more comma-separated event types
@@ -194,6 +200,14 @@ func main() {
 	if _, err := engine.RunFile("testdata/bars_5_rows.csv"); err != nil {
 		log.Fatal(err)
 	}
+}
+```
+
+Use `RunFiles` to merge multiple ordered sources into one replay:
+
+```go
+if _, err := engine.RunFiles("sessions/quotes.tape", "sessions/trades.tape"); err != nil {
+	log.Fatal(err)
 }
 ```
 

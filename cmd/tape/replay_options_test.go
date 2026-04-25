@@ -32,8 +32,8 @@ func TestReplayCommandOptionsParseAndBuildReplayConfig(t *testing.T) {
 		t.Fatalf("config: %v", err)
 	}
 
-	if options.path != "./session.tape" {
-		t.Fatalf("path = %q, want ./session.tape", options.path)
+	if got := strings.Join(options.paths, ","); got != "./session.tape" {
+		t.Fatalf("paths = %q, want ./session.tape", got)
 	}
 	if !options.step || !options.print || options.metrics || !options.permissive {
 		t.Fatalf("unexpected option flags: %+v", options)
@@ -79,6 +79,22 @@ func TestReplayCommandOptionsBuildInspectConfigDefaultsToMaxSpeed(t *testing.T) 
 	}
 	if options.sample != 2 {
 		t.Fatalf("sample = %d, want 2", options.sample)
+	}
+}
+
+func TestReplayCommandOptionsParseMultiplePaths(t *testing.T) {
+	options := newReplayCommandOptions()
+	err := options.parse(replaySpec, []string{
+		"./quotes.tape",
+		"./trades.tape",
+		"--metrics=false",
+	})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	if got := strings.Join(options.paths, ","); got != "./quotes.tape,./trades.tape" {
+		t.Fatalf("paths = %q, want ./quotes.tape,./trades.tape", got)
 	}
 }
 

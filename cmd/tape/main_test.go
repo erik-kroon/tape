@@ -90,6 +90,44 @@ func TestRunReplayRecordsEvents(t *testing.T) {
 	}
 }
 
+func TestRunReplayMergesMultipleSourcesInOrder(t *testing.T) {
+	quotesPath := filepath.Join(t.TempDir(), "quotes.tape")
+	tradesPath := filepath.Join(t.TempDir(), "trades.tape")
+	writeSessionFile(t, quotesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":92.50,"size":100,"seq":1},"index":0}`,
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:01Z","symbol":"ERICB","price":92.53,"size":80,"seq":3},"index":1}`,
+	})
+	writeSessionFile(t, tradesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":92.51,"size":10,"seq":1},"index":0}`,
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00.5Z","symbol":"ERICB","price":92.52,"size":12,"seq":2},"index":1}`,
+	})
+
+	output := captureStdout(t, func() {
+		err := run([]string{
+			"replay",
+			"--print",
+			"--metrics=false",
+			quotesPath,
+			tradesPath,
+		})
+		if err != nil {
+			t.Fatalf("run replay: %v", err)
+		}
+	})
+
+	want := []string{
+		"seq=1 time=2026-04-24T09:30:00Z symbol=ERICB price=92.5000 size=100.0000",
+		"seq=2 time=2026-04-24T09:30:00Z symbol=ERICB price=92.5100 size=10.0000",
+		"seq=3 time=2026-04-24T09:30:00.5Z symbol=ERICB price=92.5200 size=12.0000",
+		"seq=4 time=2026-04-24T09:30:01Z symbol=ERICB price=92.5300 size=80.0000",
+	}
+	for _, fragment := range want {
+		if !strings.Contains(output, fragment) {
+			t.Fatalf("output missing %q\n%s", fragment, output)
+		}
+	}
+}
+
 func TestRunIndexBuildsSidecar(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.tape")
 	records := strings.Join([]string{
@@ -361,4 +399,13 @@ func runGoProgram(t *testing.T, path string) string {
 		t.Fatalf("go run %s: %v\n%s", path, err, output)
 	}
 	return string(output)
+}
+
+func writeSessionFile(t *testing.T, path string, records []string) {
+	t.Helper()
+
+	data := strings.Join(records, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
 }

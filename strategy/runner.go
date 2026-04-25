@@ -7,11 +7,13 @@ import (
 )
 
 type RunContext struct {
-	Path string
+	Path  string
+	Paths []string
 }
 
 type RunResult struct {
 	Path    string
+	Paths   []string
 	Summary tape.Summary
 	Err     error
 }
@@ -39,7 +41,11 @@ func NewRunner(config tape.Config, options ...Option) Runner {
 }
 
 func RunFile(path string, config tape.Config, hooks Hooks, options ...Option) (tape.Summary, error) {
-	return NewRunner(config, options...).RunFile(path, hooks)
+	return RunFiles([]string{path}, config, hooks, options...)
+}
+
+func RunFiles(paths []string, config tape.Config, hooks Hooks, options ...Option) (tape.Summary, error) {
+	return NewRunner(config, options...).RunFiles(paths, hooks)
 }
 
 func Run(stream tape.Stream, config tape.Config, hooks Hooks, options ...Option) (tape.Summary, error) {
@@ -59,8 +65,13 @@ func WithSinks(sinks ...tape.OutputSink) Option {
 }
 
 func (r Runner) RunFile(path string, hooks Hooks) (tape.Summary, error) {
-	return r.run(RunContext{Path: path}, hooks, func(engine *tape.Engine) (tape.Summary, error) {
-		return engine.RunFile(path)
+	return r.RunFiles([]string{path}, hooks)
+}
+
+func (r Runner) RunFiles(paths []string, hooks Hooks) (tape.Summary, error) {
+	runContext := newRunContext(paths)
+	return r.run(runContext, hooks, func(engine *tape.Engine) (tape.Summary, error) {
+		return engine.RunFiles(paths...)
 	})
 }
 
@@ -70,22 +81,32 @@ func (r Runner) Run(stream tape.Stream, hooks Hooks) (tape.Summary, error) {
 	})
 }
 
+func newRunContext(paths []string) RunContext {
+	cloned := append([]string(nil), paths...)
+	context := RunContext{Paths: cloned}
+	if len(cloned) == 1 {
+		context.Path = cloned[0]
+	}
+	return context
+}
+
+func newRunResult(runContext RunContext, summary tape.Summary, err error) RunResult {
+	return RunResult{
+		Path:    runContext.Path,
+		Paths:   append([]string(nil), runContext.Paths...),
+		Summary: summary,
+		Err:     err,
+	}
+}
+
 func (r Runner) run(runContext RunContext, hooks Hooks, execute func(*tape.Engine) (tape.Summary, error)) (summary tape.Summary, err error) {
 	if hooks.OnEvent == nil {
 		err = errors.New("strategy: OnEvent hook is required")
-		return summary, finalize(hooks.OnEnd, RunResult{
-			Path:    runContext.Path,
-			Summary: summary,
-			Err:     err,
-		})
+		return summary, finalize(hooks.OnEnd, newRunResult(runContext, summary, err))
 	}
 
 	defer func() {
-		err = finalize(hooks.OnEnd, RunResult{
-			Path:    runContext.Path,
-			Summary: summary,
-			Err:     err,
-		})
+		err = finalize(hooks.OnEnd, newRunResult(runContext, summary, err))
 	}()
 
 	if hooks.OnStart != nil {

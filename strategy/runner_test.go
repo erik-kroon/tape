@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +51,50 @@ func TestRunFileInvokesHooksInOrder(t *testing.T) {
 	}
 	if summary.Events != 5 {
 		t.Fatalf("events = %d, want 5", summary.Events)
+	}
+}
+
+func TestRunFilesExposeMergedPaths(t *testing.T) {
+	quotesPath := filepath.Join(t.TempDir(), "quotes.tape")
+	tradesPath := filepath.Join(t.TempDir(), "trades.tape")
+	writeSessionFile(t, quotesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":92.50,"size":100,"seq":1},"index":0}`,
+	})
+	writeSessionFile(t, tradesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00.5Z","symbol":"ERICB","price":92.52,"size":12,"seq":2},"index":0}`,
+	})
+
+	var started strategy.RunContext
+	var ended strategy.RunResult
+	summary, err := strategy.RunFiles([]string{quotesPath, tradesPath}, tape.Config{
+		Mode: tape.MaxSpeedMode,
+	}, strategy.Hooks{
+		OnStart: func(ctx strategy.RunContext) error {
+			started = ctx
+			return nil
+		},
+		OnEvent: func(ctx tape.Context, event tape.Event) error {
+			return nil
+		},
+		OnEnd: func(result strategy.RunResult) error {
+			ended = result
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("run files: %v", err)
+	}
+	if summary.Events != 2 {
+		t.Fatalf("events = %d, want 2", summary.Events)
+	}
+	if started.Path != "" {
+		t.Fatalf("start path = %q, want empty for multi-source run", started.Path)
+	}
+	if got := strings.Join(started.Paths, ","); got != quotesPath+","+tradesPath {
+		t.Fatalf("start paths = %q, want %q", got, quotesPath+","+tradesPath)
+	}
+	if got := strings.Join(ended.Paths, ","); got != quotesPath+","+tradesPath {
+		t.Fatalf("end paths = %q, want %q", got, quotesPath+","+tradesPath)
 	}
 }
 
@@ -213,4 +259,13 @@ func (s *eventStream) Next() (tape.Event, error) {
 
 func (s *eventStream) Close() error {
 	return nil
+}
+
+func writeSessionFile(t *testing.T, path string, records []string) {
+	t.Helper()
+
+	data := strings.Join(records, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
 }
