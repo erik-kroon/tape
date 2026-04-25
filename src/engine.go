@@ -18,6 +18,7 @@ type Context struct {
 	Measured      bool
 	MeasuredIndex int
 	StartedAt     time.Time
+	SourcePaths   []string
 	replayTime    time.Time
 }
 
@@ -113,7 +114,7 @@ func (e *Engine) RunFiles(paths ...string) (Summary, error) {
 	}
 	defer selection.Close()
 
-	return e.runSelection(selection)
+	return e.runSelection(selection, paths)
 }
 
 func (e *Engine) Run(stream Stream) (summary Summary, err error) {
@@ -126,10 +127,10 @@ func (e *Engine) Run(stream Stream) (summary Summary, err error) {
 		return Summary{}, err
 	}
 
-	return e.runSelection(selection)
+	return e.runSelection(selection, nil)
 }
 
-func (e *Engine) runSelection(selection *ReplaySelection) (summary Summary, err error) {
+func (e *Engine) runSelection(selection *ReplaySelection, sourcePaths []string) (summary Summary, err error) {
 	if err := e.config.validate(); err != nil {
 		return Summary{}, err
 	}
@@ -148,6 +149,7 @@ func (e *Engine) runSelection(selection *ReplaySelection) (summary Summary, err 
 		summary.HandlerDuration = timer.Total()
 	}()
 
+	copiedSourcePaths := append([]string(nil), sourcePaths...)
 	handler := e.chainHandlers(timer)
 	clock := newReplayClock(e.config)
 
@@ -184,6 +186,7 @@ func (e *Engine) runSelection(selection *ReplaySelection) (summary Summary, err 
 			Measured:      true,
 			MeasuredIndex: selected.Index,
 			StartedAt:     summary.StartedAt,
+			SourcePaths:   copiedSourcePaths,
 			replayTime:    event.Timestamp(),
 		}
 		if err = handler(ctx, event); err != nil {

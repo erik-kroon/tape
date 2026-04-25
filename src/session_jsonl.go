@@ -41,7 +41,11 @@ func (r *Recorder) Middleware() Middleware {
 }
 
 func (r *Recorder) Write(ctx Context, event Event) error {
-	return r.Record(ctx.Index, event)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.writer.ObserveContext(ctx)
+	return r.writer.Write(ctx.Index, event)
 }
 
 func (r *Recorder) Record(index int, event Event) error {

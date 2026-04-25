@@ -167,6 +167,8 @@ Processing starts from the first event at or after that position.
 
 Tape can record event streams into `.tape` files and replay them later with the same engine and filters used for CSV or Parquet input.
 
+Each recorded `.tape` begins with a metadata header line that captures source paths and formats, symbol universe, event families, timezone assumptions, and the session schema version. Replay and indexing skip that header automatically.
+
 When a recording closes, Tape writes a `.idx` sidecar automatically. That index allows direct seeks into large `.tape` and `.jsonl` sessions when `--start-at` is used. If the index is missing or stale, Tape falls back to a linear scan.
 
 ## Use as a Library

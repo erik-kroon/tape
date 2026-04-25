@@ -14,6 +14,9 @@ import (
 )
 
 const sessionIndexVersion = 1
+const sessionMetadataSchemaVersion = 1
+
+var errSessionMetadataRecord = errors.New("session metadata record")
 
 type sessionFile struct {
 	path   string
@@ -44,6 +47,11 @@ type sessionFileWriter struct {
 	writer       *bufio.Writer
 	bytesWritten int64
 	indexEntries []sessionIndexEntry
+	sources      []sessionSource
+	sourceSet    map[string]struct{}
+	symbolSet    map[string]struct{}
+	familySet    map[string]struct{}
+	timezoneSet  map[string]struct{}
 	closed       bool
 }
 
@@ -52,6 +60,27 @@ type sessionFileStream struct {
 	file    *os.File
 	scanner *bufio.Scanner
 	index   *sessionIndex
+}
+
+type sessionMetadata struct {
+	SchemaVersion       int               `json:"schema_version"`
+	SourceInfo          sessionSourceInfo `json:"source_info"`
+	SymbolUniverse      []string          `json:"symbol_universe"`
+	EventFamilies       []string          `json:"event_families"`
+	TimezoneAssumptions []string          `json:"timezone_assumptions"`
+}
+
+type sessionSourceInfo struct {
+	Sources []sessionSource `json:"sources"`
+}
+
+type sessionSource struct {
+	Path   string `json:"path"`
+	Format string `json:"format"`
+}
+
+type sessionMetadataRecord struct {
+	Meta sessionMetadata `json:"meta"`
 }
 
 func newSessionFile(path string, codecs []EventCodec) (sessionFile, error) {
@@ -144,9 +173,15 @@ func (s sessionFile) newWriter() (*sessionFileWriter, error) {
 	}
 
 	return &sessionFileWriter{
-		session: s,
-		file:    file,
-		writer:  bufio.NewWriter(file),
+		session:   s,
+		file:      file,
+		writer:    bufio.NewWriter(file),
+		sourceSet: map[string]struct{}{},
+		symbolSet: map[string]struct{}{},
+		familySet: map[string]struct{}{},
+		timezoneSet: map[string]struct{}{
+			"recorded timestamps preserve the offset carried by each event": {},
+		},
 	}, nil
 }
 
@@ -193,11 +228,15 @@ func (s sessionFile) scanIndexEntries() ([]sessionIndexEntry, error) {
 			offset += int64(len(line))
 			record, event, decodeErr := s.decodeLine(line)
 			if decodeErr != nil {
+				if errors.Is(decodeErr, errSessionMetadataRecord) {
+					goto next
+				}
 				return nil, decodeErr
 			}
 			entries = append(entries, newSessionIndexEntry(lineOffset, record.Index, event))
 		}
 
+	next:
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -266,6 +305,9 @@ func (s sessionFile) decodeLine(line []byte) (sessionRecord, Event, error) {
 	if err != nil {
 		return sessionRecord{}, nil, err
 	}
+	if record.Meta != nil {
+		return record, nil, errSessionMetadataRecord
+	}
 
 	event, err := s.codecs.Decode(record)
 	if err != nil {
@@ -280,6 +322,7 @@ func (w *sessionFileWriter) Write(index int, event Event) error {
 		return fmt.Errorf("sink error: recorder closed")
 	}
 
+	w.observeEvent(event)
 	record, err := w.session.codecs.Marshal(index, event)
 	if err != nil {
 		return err
@@ -310,22 +353,37 @@ func (w *sessionFileWriter) Close() error {
 	if err := w.file.Close(); err != nil {
 		return err
 	}
+
+	shift, err := w.prependMetadata()
+	if err != nil {
+		return err
+	}
+	if shift > 0 {
+		for index := range w.indexEntries {
+			w.indexEntries[index].Offset += shift
+		}
+	}
 	return w.session.writeIndex(w.indexEntries)
 }
 
 func (s *sessionFileStream) Next() (Event, error) {
-	if !s.scanner.Scan() {
-		if err := s.scanner.Err(); err != nil {
+	for {
+		if !s.scanner.Scan() {
+			if err := s.scanner.Err(); err != nil {
+				return nil, err
+			}
+			return nil, io.EOF
+		}
+
+		_, event, err := s.session.decodeLine(s.scanner.Bytes())
+		if errors.Is(err, errSessionMetadataRecord) {
+			continue
+		}
+		if err != nil {
 			return nil, err
 		}
-		return nil, io.EOF
+		return event, nil
 	}
-
-	_, event, err := s.session.decodeLine(s.scanner.Bytes())
-	if err != nil {
-		return nil, err
-	}
-	return event, nil
 }
 
 func (s *sessionFileStream) SeekStartAt(startAt StartAt) (bool, error) {
@@ -392,4 +450,123 @@ func newSessionIndexEntry(offset int64, index int, event Event) sessionIndexEntr
 		Sequence: event.Sequence(),
 		Index:    index,
 	}
+}
+
+func (w *sessionFileWriter) ObserveContext(ctx Context) {
+	for _, path := range ctx.SourcePaths {
+		w.observeSourcePath(path)
+	}
+}
+
+func (w *sessionFileWriter) observeSourcePath(path string) {
+	if path == "" {
+		return
+	}
+
+	format := sessionSourceFormat(path)
+	key := format + "\x00" + path
+	if _, exists := w.sourceSet[key]; exists {
+		return
+	}
+	w.sourceSet[key] = struct{}{}
+	w.sources = append(w.sources, sessionSource{
+		Path:   path,
+		Format: format,
+	})
+	if format == "csv" {
+		w.timezoneSet["CSV timestamps without an explicit offset are interpreted as UTC"] = struct{}{}
+	}
+}
+
+func (w *sessionFileWriter) observeEvent(event Event) {
+	if family := strings.TrimSpace(event.Type()); family != "" {
+		w.familySet[family] = struct{}{}
+	}
+	if symbol := strings.TrimSpace(event.Symbol()); symbol != "" {
+		w.symbolSet[symbol] = struct{}{}
+	}
+}
+
+func (w *sessionFileWriter) prependMetadata() (int64, error) {
+	line, err := json.Marshal(sessionMetadataRecord{
+		Meta: w.snapshotMetadata(),
+	})
+	if err != nil {
+		return 0, err
+	}
+	line = append(line, '\n')
+
+	if err := prependFile(w.session.path, line); err != nil {
+		return 0, err
+	}
+	return int64(len(line)), nil
+}
+
+func (w *sessionFileWriter) snapshotMetadata() sessionMetadata {
+	sources := append([]sessionSource(nil), w.sources...)
+	sort.Slice(sources, func(i int, j int) bool {
+		if sources[i].Path == sources[j].Path {
+			return sources[i].Format < sources[j].Format
+		}
+		return sources[i].Path < sources[j].Path
+	})
+
+	return sessionMetadata{
+		SchemaVersion: sessionMetadataSchemaVersion,
+		SourceInfo: sessionSourceInfo{
+			Sources: sources,
+		},
+		SymbolUniverse:      sortedKeys(w.symbolSet),
+		EventFamilies:       sortedKeys(w.familySet),
+		TimezoneAssumptions: sortedKeys(w.timezoneSet),
+	}
+}
+
+func sortedKeys(values map[string]struct{}) []string {
+	items := make([]string, 0, len(values))
+	for value := range values {
+		items = append(items, value)
+	}
+	sort.Strings(items)
+	return items
+}
+
+func sessionSourceFormat(path string) string {
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if ext == "" {
+		return "unknown"
+	}
+	return ext
+}
+
+func prependFile(path string, prefix []byte) error {
+	source, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+
+	tempPath := path + ".tmp"
+	temp, err := os.Create(tempPath)
+	if err != nil {
+		return err
+	}
+
+	writeErr := func(err error) error {
+		temp.Close()
+		_ = os.Remove(tempPath)
+		return err
+	}
+
+	if _, err := temp.Write(prefix); err != nil {
+		return writeErr(err)
+	}
+	if _, err := io.Copy(temp, source); err != nil {
+		return writeErr(err)
+	}
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	return os.Rename(tempPath, path)
 }
