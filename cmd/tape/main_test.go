@@ -301,6 +301,16 @@ func TestRunnableExamples(t *testing.T) {
 				"Throughput:",
 			},
 		},
+		{
+			name: "strategy",
+			path: "./examples/strategy",
+			fragments: []string{
+				"Starting strategy on",
+				"bar[0] ERICB close=92.70",
+				"Strategy completed with 5 events",
+				"Harness summary events=5 symbols=1",
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			output := runGoProgram(t, tc.path)
