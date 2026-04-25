@@ -26,6 +26,7 @@ type Hooks struct {
 
 type Runner struct {
 	config     tape.Config
+	ranges     ReplayRanges
 	middleware []tape.Middleware
 	sinks      []tape.OutputSink
 }
@@ -61,6 +62,12 @@ func WithMiddleware(middleware ...tape.Middleware) Option {
 func WithSinks(sinks ...tape.OutputSink) Option {
 	return func(runner *Runner) {
 		runner.sinks = append(runner.sinks, sinks...)
+	}
+}
+
+func WithReplayRanges(ranges ReplayRanges) Option {
+	return func(runner *Runner) {
+		runner.ranges = ranges
 	}
 }
 
@@ -105,6 +112,11 @@ func (r Runner) run(runContext RunContext, hooks Hooks, execute func(*tape.Engin
 		return summary, finalize(hooks.OnEnd, newRunResult(runContext, summary, err))
 	}
 
+	config, err := r.runtimeConfig()
+	if err != nil {
+		return summary, finalize(hooks.OnEnd, newRunResult(runContext, summary, err))
+	}
+
 	defer func() {
 		err = finalize(hooks.OnEnd, newRunResult(runContext, summary, err))
 	}()
@@ -115,16 +127,33 @@ func (r Runner) run(runContext RunContext, hooks Hooks, execute func(*tape.Engin
 		}
 	}
 
-	engine := tape.NewEngine(r.config)
+	engine := tape.NewEngine(config)
 	for _, middleware := range r.middleware {
 		engine.Use(middleware)
 	}
 	for _, sink := range r.sinks {
 		engine.AddSink(sink)
 	}
-	engine.OnEvent(hooks.OnEvent)
+	engine.OnEvent(r.wrapOnEvent(hooks.OnEvent))
 
 	return execute(engine)
+}
+
+func (r Runner) runtimeConfig() (tape.Config, error) {
+	config := r.config
+	filter, err := r.ranges.combinedFilter(config.Filter)
+	if err != nil {
+		return tape.Config{}, err
+	}
+	config.Filter = filter
+	return config, nil
+}
+
+func (r Runner) wrapOnEvent(onEvent func(tape.Context, tape.Event) error) func(tape.Context, tape.Event) error {
+	measuredIndex := 0
+	return func(ctx tape.Context, event tape.Event) error {
+		return onEvent(r.ranges.decorateContext(ctx, event, &measuredIndex), event)
+	}
 }
 
 func finalize(onEnd func(RunResult) error, result RunResult) error {

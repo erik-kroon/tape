@@ -127,3 +127,50 @@ func TestOutputCaptureRejectsMultiLineEncodedOutput(t *testing.T) {
 		t.Fatalf("record error = %q, want multiline output error", err.Error())
 	}
 }
+
+func TestOutputCaptureRecordMeasuredSkipsWarmupOutputs(t *testing.T) {
+	capture := strategy.NewOutputCapture[capturedSignal]()
+	timestamps := []time.Time{
+		time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 9, 31, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 9, 32, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 9, 33, 0, 0, time.UTC),
+	}
+
+	_, err := strategy.Run(newEventStream(
+		tape.Bar{Time: timestamps[0], Sym: "ERICB", Open: 93.00, High: 93.10, Low: 92.90, Close: 93.05, Seq: 1},
+		tape.Bar{Time: timestamps[1], Sym: "ERICB", Open: 93.05, High: 93.20, Low: 93.00, Close: 93.15, Seq: 2},
+		tape.Bar{Time: timestamps[2], Sym: "ERICB", Open: 93.15, High: 93.30, Low: 93.10, Close: 93.25, Seq: 3},
+		tape.Bar{Time: timestamps[3], Sym: "ERICB", Open: 93.25, High: 93.40, Low: 93.20, Close: 93.35, Seq: 4},
+	), tape.Config{Mode: tape.MaxSpeedMode}, strategy.Hooks{
+		OnEvent: func(ctx tape.Context, event tape.Event) error {
+			bar := event.(tape.Bar)
+			return capture.RecordMeasured(ctx, capturedSignal{
+				Index:  ctx.MeasuredIndex,
+				Time:   bar.Time,
+				Symbol: bar.Sym,
+				Side:   "buy",
+				Close:  bar.Close,
+			})
+		},
+	}, strategy.WithReplayRanges(strategy.ReplayRanges{
+		Warmup: strategy.ReplayRange{
+			Start: timestamps[0],
+			End:   timestamps[1],
+		},
+		Measured: strategy.ReplayRange{
+			Start: timestamps[2],
+			End:   timestamps[3],
+		},
+	}))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	want := "" +
+		"{\"index\":0,\"time\":\"2026-04-24T09:32:00Z\",\"symbol\":\"ERICB\",\"side\":\"buy\",\"close\":93.25}\n" +
+		"{\"index\":1,\"time\":\"2026-04-24T09:33:00Z\",\"symbol\":\"ERICB\",\"side\":\"buy\",\"close\":93.35}\n"
+	if capture.String() != want {
+		t.Fatalf("capture = %q, want %q", capture.String(), want)
+	}
+}

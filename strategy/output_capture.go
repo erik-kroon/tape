@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/erik-kroon/tape/internal/testutil/golden"
+	tape "github.com/erik-kroon/tape/src"
 )
 
 // OutputCapture records deterministic strategy outputs as single-line snapshots.
@@ -55,6 +56,14 @@ func (c *OutputCapture[T]) Record(output T) error {
 
 	c.lines = append(c.lines, string(encoded))
 	return nil
+}
+
+// RecordMeasured appends one encoded output line only for measured events.
+func (c *OutputCapture[T]) RecordMeasured(ctx tape.Context, output T) error {
+	if !ctx.Measured {
+		return nil
+	}
+	return c.Record(output)
 }
 
 // String renders the capture as newline-delimited output with a trailing newline.

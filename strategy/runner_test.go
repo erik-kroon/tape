@@ -216,6 +216,82 @@ func TestRunnerOptionsApplyMiddlewareAndSinks(t *testing.T) {
 	}
 }
 
+func TestRunAppliesWarmupAndMeasuredRanges(t *testing.T) {
+	timestamps := []time.Time{
+		time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 9, 31, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 9, 32, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 9, 33, 0, 0, time.UTC),
+		time.Date(2026, 4, 24, 9, 34, 0, 0, time.UTC),
+	}
+
+	var got []string
+	summary, err := strategy.Run(newEventStream(
+		tape.Tick{Time: timestamps[0], Sym: "ERICB", Price: 93.10, Seq: 1},
+		tape.Tick{Time: timestamps[1], Sym: "ERICB", Price: 93.20, Seq: 2},
+		tape.Tick{Time: timestamps[2], Sym: "ERICB", Price: 93.30, Seq: 3},
+		tape.Tick{Time: timestamps[3], Sym: "ERICB", Price: 93.40, Seq: 4},
+		tape.Tick{Time: timestamps[4], Sym: "ERICB", Price: 93.50, Seq: 5},
+	), tape.Config{Mode: tape.MaxSpeedMode}, strategy.Hooks{
+		OnEvent: func(ctx tape.Context, event tape.Event) error {
+			got = append(got, fmt.Sprintf("%d:%t:%d:%d", ctx.Index, ctx.Measured, ctx.MeasuredIndex, event.Sequence()))
+			return nil
+		},
+	}, strategy.WithReplayRanges(strategy.ReplayRanges{
+		Warmup: strategy.ReplayRange{
+			Start: timestamps[0],
+			End:   timestamps[1],
+		},
+		Measured: strategy.ReplayRange{
+			Start: timestamps[2],
+			End:   timestamps[3],
+		},
+	}))
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	want := []string{
+		"0:false:-1:1",
+		"1:false:-1:2",
+		"2:true:0:3",
+		"3:true:1:4",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	if summary.Events != 4 {
+		t.Fatalf("summary events = %d, want 4", summary.Events)
+	}
+}
+
+func TestRunRejectsReplayRangesWhenConfigTimeFilterIsSet(t *testing.T) {
+	timestamp := time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC)
+
+	_, err := strategy.Run(newEventStream(
+		tape.Tick{Time: timestamp, Sym: "ERICB", Price: 93.10, Seq: 1},
+	), tape.Config{
+		Mode: tape.MaxSpeedMode,
+		Filter: tape.Filter{
+			StartTime: timestamp,
+		},
+	}, strategy.Hooks{
+		OnEvent: func(ctx tape.Context, event tape.Event) error {
+			return nil
+		},
+	}, strategy.WithReplayRanges(strategy.ReplayRanges{
+		Measured: strategy.ReplayRange{
+			Start: timestamp,
+		},
+	}))
+	if err == nil {
+		t.Fatal("err = nil, want replay-range conflict error")
+	}
+	if err.Error() != "strategy: replay ranges cannot be combined with config filter start/end time" {
+		t.Fatalf("err = %q, want replay-range conflict error", err.Error())
+	}
+}
+
 func TestRunRejectsMissingOnEventHook(t *testing.T) {
 	onEndCalls := 0
 
