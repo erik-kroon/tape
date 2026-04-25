@@ -11,7 +11,7 @@ import (
 const updateEnvVar = "UPDATE_GOLDEN"
 
 // Assert compares actual output against a golden file and can refresh it when requested.
-func Assert(t *testing.T, path string, actual string) {
+func Assert(t testing.TB, path string, actual string) {
 	t.Helper()
 
 	actual = normalize(actual)
@@ -35,7 +35,7 @@ func Assert(t *testing.T, path string, actual string) {
 	}
 
 	t.Fatalf(
-		"golden output mismatch for %s\n%s\nRefresh with `%s=1 go test ./cmd/tape`.",
+		"golden output mismatch for %s\n%s\nRefresh with `%s=1 go test ./...`.",
 		path,
 		diff(expected, actual),
 		updateEnvVar,
