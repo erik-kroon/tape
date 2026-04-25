@@ -288,6 +288,72 @@ func TestCheckDeterminismParquet(t *testing.T) {
 	}
 }
 
+func TestRunFilesMergesSourcesInDeterministicOrder(t *testing.T) {
+	quotesPath := filepath.Join(t.TempDir(), "quotes.tape")
+	tradesPath := filepath.Join(t.TempDir(), "trades.tape")
+
+	writeSessionFile(t, quotesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":92.50,"size":100,"seq":1},"index":0}`,
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:01Z","symbol":"ERICB","price":92.53,"size":80,"seq":3},"index":1}`,
+	})
+	writeSessionFile(t, tradesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":92.51,"size":10,"seq":1},"index":0}`,
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00.5Z","symbol":"ERICB","price":92.52,"size":12,"seq":2},"index":1}`,
+	})
+
+	engine := tape.NewEngine(tape.Config{Mode: tape.MaxSpeedMode})
+	var got []string
+	engine.OnEvent(func(ctx tape.Context, event tape.Event) error {
+		got = append(got, fmt.Sprintf("%d:%s:%.2f", ctx.Index, event.Timestamp().Format(time.RFC3339Nano), event.(tape.Tick).Price))
+		return nil
+	})
+
+	summary, err := engine.RunFiles(quotesPath, tradesPath)
+	if err != nil {
+		t.Fatalf("run files: %v", err)
+	}
+	if summary.Events != 4 {
+		t.Fatalf("events = %d, want 4", summary.Events)
+	}
+
+	want := []string{
+		"0:2026-04-24T09:30:00Z:92.50",
+		"1:2026-04-24T09:30:00Z:92.51",
+		"2:2026-04-24T09:30:00.5Z:92.52",
+		"3:2026-04-24T09:30:01Z:92.53",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+}
+
+func TestCheckDeterminismFiles(t *testing.T) {
+	quotesPath := filepath.Join(t.TempDir(), "quotes.tape")
+	tradesPath := filepath.Join(t.TempDir(), "trades.tape")
+
+	writeSessionFile(t, quotesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":92.50,"size":100,"seq":1},"index":0}`,
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:01Z","symbol":"ERICB","price":92.53,"size":80,"seq":3},"index":1}`,
+	})
+	writeSessionFile(t, tradesPath, []string{
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00Z","symbol":"ERICB","price":92.51,"size":10,"seq":1},"index":0}`,
+		`{"type":"tick","payload":{"time":"2026-04-24T09:30:00.5Z","symbol":"ERICB","price":92.52,"size":12,"seq":2},"index":1}`,
+	})
+
+	result, err := tape.CheckDeterminismFiles([]string{quotesPath, tradesPath}, tape.Config{
+		Mode: tape.MaxSpeedMode,
+	}, 3)
+	if err != nil {
+		t.Fatalf("check determinism files: %v", err)
+	}
+	if result.Events != 4 {
+		t.Fatalf("events = %d, want 4", result.Events)
+	}
+	if len(result.Hash) != 64 {
+		t.Fatalf("hash length = %d, want 64", len(result.Hash))
+	}
+}
+
 func TestRecorderRoundTripWithCustomCodec(t *testing.T) {
 	recordingPath := filepath.Join(t.TempDir(), "custom-session.tape")
 	codec := headlineEventCodec()
@@ -526,6 +592,15 @@ func TestSummaryTracksErrorsOnHandlerFailure(t *testing.T) {
 	}
 	if summary.FinishedAt.IsZero() {
 		t.Fatal("finished at is zero, want non-zero")
+	}
+}
+
+func writeSessionFile(t *testing.T, path string, records []string) {
+	t.Helper()
+
+	data := strings.Join(records, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(data), 0o600); err != nil {
+		t.Fatalf("write session file: %v", err)
 	}
 }
 

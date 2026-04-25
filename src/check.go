@@ -58,6 +58,10 @@ type DeterminismResult struct {
 }
 
 func CheckDeterminism(path string, config Config, runs int) (DeterminismResult, error) {
+	return CheckDeterminismFiles([]string{path}, config, runs)
+}
+
+func CheckDeterminismFiles(paths []string, config Config, runs int) (DeterminismResult, error) {
 	if runs <= 0 {
 		runs = 1
 	}
@@ -73,7 +77,7 @@ func CheckDeterminism(path string, config Config, runs int) (DeterminismResult, 
 		}
 		engine.Use(hasher.Middleware())
 
-		summary, err := engine.RunFile(path)
+		summary, err := engine.RunFiles(paths...)
 		if err != nil {
 			return DeterminismResult{}, err
 		}

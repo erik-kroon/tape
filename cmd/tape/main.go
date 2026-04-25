@@ -74,7 +74,7 @@ func runReplay(args []string) error {
 		engine.AddSink(recorder)
 	}
 
-	summary, err := engine.RunFile(options.path)
+	summary, err := engine.RunFiles(options.paths...)
 	if err != nil {
 		return err
 	}
@@ -96,11 +96,11 @@ func runInspect(args []string) error {
 	}
 
 	engine := tape.NewEngine(config)
-	summary, err := engine.RunFile(options.path)
+	summary, err := engine.RunFiles(options.paths...)
 	if err != nil {
 		return err
 	}
-	samples, err := sampleEvents(options.path, options.sample, config)
+	samples, err := sampleEvents(options.paths, options.sample, config)
 	if err != nil {
 		return err
 	}
@@ -157,7 +157,7 @@ func runCheck(args []string) error {
 		return err
 	}
 
-	result, err := tape.CheckDeterminism(options.path, config, options.runs)
+	result, err := tape.CheckDeterminismFiles(options.paths, config, options.runs)
 	if err != nil {
 		return err
 	}
@@ -250,12 +250,12 @@ func printUsage() {
 	fmt.Println("  tape index <path>")
 }
 
-func sampleEvents(path string, limit int, config tape.Config) ([]tape.Event, error) {
+func sampleEvents(paths []string, limit int, config tape.Config) ([]tape.Event, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
 
-	selection, err := tape.OpenReplaySelection(path, config)
+	selection, err := tape.OpenReplaySelectionPaths(paths, config)
 	if err != nil {
 		return nil, err
 	}

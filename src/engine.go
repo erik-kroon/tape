@@ -97,11 +97,15 @@ func (e *Engine) OnBar(handler func(Context, Bar) error) {
 }
 
 func (e *Engine) RunFile(path string) (Summary, error) {
+	return e.RunFiles(path)
+}
+
+func (e *Engine) RunFiles(paths ...string) (Summary, error) {
 	if err := e.config.validate(); err != nil {
 		return Summary{}, err
 	}
 
-	selection, err := OpenReplaySelection(path, e.config)
+	selection, err := OpenReplaySelectionPaths(paths, e.config)
 	if err != nil {
 		return Summary{}, err
 	}

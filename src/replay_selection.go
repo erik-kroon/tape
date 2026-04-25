@@ -14,12 +14,16 @@ type ReplaySelection struct {
 }
 
 func OpenReplaySelection(path string, config Config) (*ReplaySelection, error) {
+	return OpenReplaySelectionPaths([]string{path}, config)
+}
+
+func OpenReplaySelectionPaths(paths []string, config Config) (*ReplaySelection, error) {
 	normalized := config.normalized()
 	if err := normalized.validate(); err != nil {
 		return nil, err
 	}
 
-	stream, err := OpenStreamWithCodecs(path, normalized.EventCodecs...)
+	stream, err := OpenStreamsWithCodecs(paths, normalized.EventCodecs...)
 	if err != nil {
 		return nil, err
 	}

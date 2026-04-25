@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	replayUsageLine  = "tape replay <path> [--speed max|realtime|100x] [--step] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]"
-	inspectUsageLine = "tape inspect <path> [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]"
-	checkUsageLine   = "tape check <path> [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]"
+	replayUsageLine  = "tape replay <path> [<path>...] [--speed max|realtime|100x] [--step] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]"
+	inspectUsageLine = "tape inspect <path> [<path>...] [--sample N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]"
+	checkUsageLine   = "tape check <path> [<path>...] [--runs N] [--symbol SYM1,SYM2] [--event-type tick,bar] [--from RFC3339] [--to RFC3339] [--start-at RFC3339|YYYY-MM-DD|SEQ]"
 )
 
 type replayCommandSpec struct {
@@ -31,7 +31,7 @@ type replayCommandSpec struct {
 }
 
 type replayCommandOptions struct {
-	path       string
+	paths      []string
 	speed      string
 	step       bool
 	print      bool
@@ -83,11 +83,11 @@ func (o *replayCommandOptions) parse(spec replayCommandSpec, args []string) erro
 	if err := flags.Parse(reorderArgs(args, valueFlags)); err != nil {
 		return err
 	}
-	if flags.NArg() != 1 {
+	if flags.NArg() == 0 {
 		return errors.New("usage: " + spec.usage)
 	}
 
-	o.path = flags.Arg(0)
+	o.paths = append([]string(nil), flags.Args()...)
 	return nil
 }
 
