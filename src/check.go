@@ -9,7 +9,7 @@ import (
 type Hasher struct {
 	hash   hash.Hash
 	events int
-	codecs eventCodecRegistry
+	codecs sessionFileCodecRegistry
 }
 
 func NewHasher() *Hasher {
@@ -21,7 +21,7 @@ func NewHasher() *Hasher {
 }
 
 func NewHasherWithCodecs(codecs ...EventCodec) (*Hasher, error) {
-	registry, err := newEventCodecRegistry(codecs)
+	registry, err := newSessionFileCodecRegistry(codecs)
 	if err != nil {
 		return nil, err
 	}
