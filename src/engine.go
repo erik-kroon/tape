@@ -14,9 +14,11 @@ type Clock interface {
 }
 
 type Context struct {
-	Index      int
-	StartedAt  time.Time
-	replayTime time.Time
+	Index         int
+	Measured      bool
+	MeasuredIndex int
+	StartedAt     time.Time
+	replayTime    time.Time
 }
 
 type EventHandler func(Context, Event) error
@@ -178,9 +180,11 @@ func (e *Engine) runSelection(selection *ReplaySelection) (summary Summary, err 
 		}
 
 		ctx := Context{
-			Index:      selected.Index,
-			StartedAt:  summary.StartedAt,
-			replayTime: event.Timestamp(),
+			Index:         selected.Index,
+			Measured:      true,
+			MeasuredIndex: selected.Index,
+			StartedAt:     summary.StartedAt,
+			replayTime:    event.Timestamp(),
 		}
 		if err = handler(ctx, event); err != nil {
 			summary.ErrorCount++

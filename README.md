@@ -271,6 +271,9 @@ type Signal struct {
 
 func TestSignals(t *testing.T) {
 	capture := strategy.NewOutputCapture[Signal]()
+	warmupStart := time.Date(2026, 4, 24, 9, 30, 0, 0, time.UTC)
+	measuredStart := time.Date(2026, 4, 24, 10, 0, 0, 0, time.UTC)
+	measuredEnd := time.Date(2026, 4, 24, 11, 0, 0, 0, time.UTC)
 
 	_, err := strategy.RunFile("testdata/bars_5_rows.csv", tape.Config{
 		Mode: tape.MaxSpeedMode,
@@ -280,14 +283,23 @@ func TestSignals(t *testing.T) {
 			if !ok || bar.Close < 93.10 {
 				return nil
 			}
-			return capture.Record(Signal{
-				Index:  ctx.Index,
+			return capture.RecordMeasured(ctx, Signal{
+				Index:  ctx.MeasuredIndex,
 				Time:   bar.Time,
 				Symbol: bar.Symbol(),
 				Side:   "buy",
 			})
 		},
-	})
+	}, strategy.WithReplayRanges(strategy.ReplayRanges{
+		Warmup: strategy.ReplayRange{
+			Start: warmupStart,
+			End:   measuredStart,
+		},
+		Measured: strategy.ReplayRange{
+			Start: measuredStart,
+			End:   measuredEnd,
+		},
+	}))
 	if err != nil {
 		t.Fatalf("run file: %v", err)
 	}
@@ -296,7 +308,7 @@ func TestSignals(t *testing.T) {
 }
 ```
 
-By default `OutputCapture` writes one JSON object per line, and `AssertMatchesFile` works with `.jsonl` or `.golden` snapshots. Use `WithOutputMarshal` when you want a custom single-line format for human-readable goldens, or `WriteFile` when you want to persist a fresh capture outside the test assertion path.
+`strategy.WithReplayRanges` expands the replay filter to cover both windows, while `ctx.Measured` and `ctx.MeasuredIndex` let your handler distinguish assertion events from warmup events. By default `OutputCapture` writes one JSON object per line, and `AssertMatchesFile` works with `.jsonl` or `.golden` snapshots. Use `RecordMeasured` when snapshots should ignore warmup output, `WithOutputMarshal` when you want a custom single-line format for human-readable goldens, or `WriteFile` when you want to persist a fresh capture outside the test assertion path.
 
 ## Supported Parquet Schemas
 

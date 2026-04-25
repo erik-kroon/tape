@@ -509,6 +509,12 @@ func TestContextClockExposesReplayTime(t *testing.T) {
 		if replayTime := ctx.ReplayTime(); !replayTime.Equal(event.Timestamp()) {
 			t.Fatalf("replay time = %s, want %s", replayTime, event.Timestamp())
 		}
+		if !ctx.Measured {
+			t.Fatal("ctx.Measured = false, want true by default")
+		}
+		if ctx.MeasuredIndex != ctx.Index {
+			t.Fatalf("measured index = %d, want %d", ctx.MeasuredIndex, ctx.Index)
+		}
 		return nil
 	})
 
