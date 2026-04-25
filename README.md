@@ -245,6 +245,45 @@ func main() {
 
 Use `strategy.NewRunner` when you want to attach Tape middleware or sinks once and reuse the same harness across runs.
 
+For replay-and-verify tests, capture your strategy outputs and assert them against checked-in snapshots:
+
+```go
+type Signal struct {
+	Index  int       `json:"index"`
+	Time   time.Time `json:"time"`
+	Symbol string    `json:"symbol"`
+	Side   string    `json:"side"`
+}
+
+func TestSignals(t *testing.T) {
+	capture := strategy.NewOutputCapture[Signal]()
+
+	_, err := strategy.RunFile("testdata/bars_5_rows.csv", tape.Config{
+		Mode: tape.MaxSpeedMode,
+	}, strategy.Hooks{
+		OnEvent: func(ctx tape.Context, event tape.Event) error {
+			bar, ok := event.(tape.Bar)
+			if !ok || bar.Close < 93.10 {
+				return nil
+			}
+			return capture.Record(Signal{
+				Index:  ctx.Index,
+				Time:   bar.Time,
+				Symbol: bar.Symbol(),
+				Side:   "buy",
+			})
+		},
+	})
+	if err != nil {
+		t.Fatalf("run file: %v", err)
+	}
+
+	capture.AssertMatchesFile(t, "testdata/signals.jsonl")
+}
+```
+
+By default `OutputCapture` writes one JSON object per line, and `AssertMatchesFile` works with `.jsonl` or `.golden` snapshots. Use `WithOutputMarshal` when you want a custom single-line format for human-readable goldens, or `WriteFile` when you want to persist a fresh capture outside the test assertion path.
+
 ## Supported Parquet Schemas
 
 Tape currently supports flat Parquet files for two event families:
@@ -300,7 +339,7 @@ engine := tape.NewEngine(tape.Config{
 
 ## Development
 
-CLI output regressions are covered with golden files in `cmd/tape/testdata`.
+CLI output regressions are covered with golden files in `cmd/tape/testdata`, and strategy-level output regressions can be captured with `strategy.OutputCapture`.
 
 Run tests:
 
@@ -311,5 +350,5 @@ go test ./...
 Refresh golden files only when an output change is intentional:
 
 ```bash
-UPDATE_GOLDEN=1 go test ./cmd/tape
+UPDATE_GOLDEN=1 go test ./...
 ```
