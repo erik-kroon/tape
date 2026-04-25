@@ -1,19 +1,31 @@
 # Tape
 
-Tape is a deterministic market-event replay engine for Go.
+Tape is a deterministic market-event replay engine for Go, built to replay historical ticks, bars, synthetic streams, and recorded sessions through trading or analytics code with repeatable timing, consistent ordering, and testable behavior.
 
-It is built for replaying historical ticks and bars through trading or analytics code with repeatable timing and consistent ordering. Tape can read CSV files, flat Parquet files, synthetic event streams, and recorded JSONL sessions stored as `.tape` files.
+It is a low-level replay/data-plane primitive for systems that need to develop, test, validate, or debug real-time market workflows. Tape is not a UI project and it is not a broker, execution engine, or financial advice system.
 
-Tape does not execute trades and does not provide financial advice.
+Tape can read CSV files, flat Parquet files, synthetic event streams, and recorded JSONL sessions stored as `.tape` files. The same replay engine powers CLI inspection, deterministic checks, session recording, strategy harnesses, and embedded Go usage.
 
 ## What Tape Includes
 
-- A Go library with `Tick`, `Bar`, and shared event interfaces
-- A replay engine with max-speed, real-time, accelerated, and step modes
-- CLI commands for replaying, sampling, benchmarking, validating, and indexing data
+- A Go library with `Tick`, `Bar`, custom event codecs, and shared event interfaces
+- A replay engine with max-speed, real-time, accelerated, and manual step modes
+- CLI commands for replaying, inspecting, benchmarking, validating, and indexing data
 - CSV and Parquet readers for tick and OHLCV bar data
-- Session recording and replay through `.tape` files
-- Determinism checks and test fixtures for the core replay loop
+- Session recording and replay through indexed `.tape` files
+- Determinism checks, golden-file fixtures, and strategy output capture
+
+## Use Tape For
+
+- Replaying historical market data through trading, analytics, or terminal code
+- Reproducing recorded sessions with stable ordering and timing semantics
+- Validating that stream handlers behave the same way across repeated runs
+- Feeding deterministic data into realtime debuggers, demos, and simulations
+- Benchmarking handler throughput with synthetic event streams
+
+## Non-Goals
+
+Tape is intentionally narrow. It does not model orders, fills, portfolio state, exchange connectivity, or brokerage execution. It can support backtesting and simulation workflows, but it is the replay engine underneath those systems rather than a full backtesting product.
 
 ## Install
 
@@ -24,6 +36,8 @@ go install github.com/erik-kroon/tape/cmd/tape@latest
 Tape currently targets `go 1.24.9`, matching the floor required by `github.com/parquet-go/parquet-go`.
 
 ## Quick Start
+
+Tape works as both a CLI and an embeddable Go library. Use the CLI to inspect and validate data quickly, then wire the engine into application or strategy code when you need repeatable replay inside tests or development tools.
 
 Replay a CSV file:
 
